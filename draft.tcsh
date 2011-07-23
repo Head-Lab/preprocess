@@ -74,8 +74,8 @@ if ( $overwrite == 1 || ! -e $motion_regressor ) then
 							   tmp_${count}_regressor_dt.txt )
 		@ count ++
 	end
-	paste $tmp_regressors > $motion_regressor
-	rm $tmp_regressors
+	paste -d " " $tmp_regressors > $motion_regressor
+	#rm $tmp_regressors
 endif
 
 #Use FSL to do 4D intensity normalization
@@ -157,7 +157,7 @@ endif
 #Create nuisance design matrix
 set nuisance_matrix = "nuisance_matrix.txt"
 if ( $overwrite == 1 || ! -e $nuisance_matrix ) then
-	paste $regressors $motion_outliers $motion_regressor > $nuisance_matrix
+	paste -d " " $regressors $motion_outliers $motion_regressor > $nuisance_matrix
 endif
 
 #Use FSL to generate residuals
