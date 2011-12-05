@@ -23,7 +23,7 @@ if ( $#argv == 0 ) then
 	echo "	-bold: Bold run."
 	echo "	-trep: Bold TR in seconds."
 	echo " 	-subj: Freesurfer subject ID."
-	echo "	-stc: File for slicetime correction."
+	echo "	-stcf: File for slicetime correction."
 	echo ""
 	echo "Optional Arguments:"
 	echo "	-root: Root for outputed files. Default is FreeSufer Subject ID"
