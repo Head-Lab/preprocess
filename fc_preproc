@@ -29,7 +29,6 @@ if ( $#argv == 0 ) then
 	echo "	-root: Root for outputed files. Default is FreeSufer Subject ID"
 	echo '	-subjdir: Set FreeSurfer subjects directory. Default is current $SUBJECTS_DIR.'
 	echo '	-outdir: Set output directory. Default is current working directory.'
-	echo '	-ref1: Use first frame as reference. Default is to use middle frame.'
 	echo "	-fwhm: Smooth bold data by specified fwhm. Default is 5mm."
 	echo "	-hpass: High pass filter in seconds. Default is 0.009. Use a negative value to skip. "
 	echo "	-lpass: Low pass filter in seconds. Default is 0.08. Use a negative value to skip."
@@ -40,8 +39,7 @@ if ( $#argv == 0 ) then
 endif
 
 #Set defaults
-set fwhm = 5; set outdir = `pwd`; set force = 0; set ref1 = 0; set debug = 0
-set hpass = 0.009; set lpass = 0.08;
+set fwhm = 5; set outdir = `pwd`; set force = 0; set debug = 0 set hpass = 0.009; set lpass = 0.08;
 
 #Parse arguments
 set args = ( $argv )
@@ -68,8 +66,6 @@ while ( $#argv > 0 )
 			set hpass = $argv[1]; shift; breaksw;
 		case -lpass:
 			set lpass = $argv[1]; shift; breaksw;
-		case -ref1:
-			set ref1 = 1; breaksw;
 		case -subjdir:
 			if ( ! -d $argv[1] ) then
 				echo "Cannot find directory $argv[1]."
@@ -163,13 +159,9 @@ if ( ! -e ${pout}_eq.nii.gz || $force == 1 ) then
 endif
 
 #Use FSL to extract reference frame
-if ( $ref1 == 1 ) then
-	set ref_vol = 0
-else
+if ( ! -e ${pout}_eq_ref.nii.gz || $force == 1 ) then
 	set n_vols = `$FSLDIR/bin/fslval ${pout}_eq dim4`
 	set ref_vol = `echo "$n_vols / 2" | bc`
-endif
-if ( ! -e ${pout}_eq_ref.nii.gz || $force == 1 ) then
 	set cmd = ( $FSLDIR/bin/fslroi ${pout}_eq ${pout}_eq_ref.nii.gz $ref_vol 1 )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
