@@ -1,0 +1,309 @@
+#!/bin/tcsh -f
+# Tyler Blazey, Winter 2011/2012
+
+#Check for dependencies
+if ( ! -e $FSLDIR ) then
+	echo "Set FSLDIR before running script"
+	exit 1
+endif
+if ( ! -e $FREESURFER_HOME ) then
+	echo "Set FREESURFER_HOME before running script"
+	exit 1
+endif
+
+#Usage
+set program = $0:t
+if ( $#argv == 0 ) then
+	echo ""
+	echo "${program}: A basic dti preprocessing script"
+	echo ""
+	echo "Usage:"
+	echo ""
+	echo "Required Arguments:"
+	echo "	-dti: <dti> 		Nifti diffusion run."
+	echo " 	-subj: <subj> 		Freesurfer subject ID."
+	echo "	-bval: <bval>		File for b-values."
+	echo "	-bvec: <bvec>		File for b-vectors."
+	echo ""
+	echo "Optional Arguments:"
+	echo "	-bthresh <thresh>	Threshold for BET masking. Default is 0.1"
+	echo "	-root <root>		Root for outputed files. Default is FreeSufer Subject ID"
+	echo '	-subjdir <dir>		FreeSurfer subjects directory. Default is current.'
+	echo "	-outdir <outdir>	Output directory. Default is <root>."
+	echo "	-force			Run command even if output exists."
+	echo "	-debug			Turn on set echo"
+	echo ""
+	exit
+endif
+
+#Set Defaults
+set bthresh = 0.1
+
+#Parse arguments
+set args = ( $argv )
+while ( $#argv > 0 )
+	set flag = $argv[1]; shift;
+	switch ( $flag )
+		case -dti:
+			set dti = `$FSLDIR/bin/remove_ext $argv[1]`; shift; breaksw;
+		case -subj:
+			set subj = $argv[1]; shift; breaksw;
+		case -bval:
+			if ( ! -e $argv[1] ) then
+				echo "Cannot find bval file at: $argv[1]"
+				exit 1
+			endif
+			set bval = $argv[1]; shift; breaksw;
+		case -bvec:
+			if ( ! -e $argv[1] ) then
+				echo "Cannot find bvec file at: $argv[1]"
+				exit 1
+			endif
+			set bvec = $argv[1]; shift; breaksw;
+		case -bthresh:
+			set bthresh = $argv[1]; shift; breaksw;
+		case -root:
+			set root = $argv[1]; shift; breaksw;
+		case -subjdir:
+			if ( ! -d $argv[1] ) then
+				echo "Cannot find directory $argv[1]."
+				exit 1
+			else
+				setenv SUBJECTS_DIR $argv[1]; shift; breaksw;
+			endif
+		case -force:
+			set force = 1; breaksw;
+		case -outdir:
+			set outdir = $argv[1]; shift; breaksw; 
+		case -debug:
+			set debug = 1; breaksw;
+		default:
+			"Option $flag not recognized. See usage"
+			exit 1
+	endsw
+end
+if ( $?debug == 1 ) set echo
+
+#Check to make sure all required options have been set
+if ( $?dti == 0 || $?subj == 0 || $?bval == 0 || $?bvec == 0 ) then
+	echo "Missing required arguments. See usage."
+	exit 1
+endif
+
+#Check to see subject is within SUBJECTS_DIR
+if ( ! -e $SUBJECTS_DIR/$subj ) then
+	echo "Cannot find subject: $subj within SUBJECTS_DIR: $SUBJECTS_DIR"
+	exit 1
+endif
+
+#Make sure there is an fsaverage in the SUBJECTS_DIR
+if ( ! -d $SUBJECTS_DIR/fsaverage ) then
+	ln -s $FREESURFER_HOME/subjects/fsaverage $SUBJECTS_DIR/fsaverage
+endif
+
+#Setup output
+if ( $?root == 0 ) set root = $subj
+if ( $?outdir == 0) set outdir = ${root};
+if ( ! -d $outdir ) mkdir -p $outdir
+
+#Create log file
+set log = $outdir/${program}_log
+if ( ! -e $log ) then
+	touch $log
+	set runnum = 1
+else
+	set oldruns = `grep -c "Run Number:" $log`
+	set runnum = `echo "$oldruns + 1" | bc`
+endif
+echo ""|& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+echo "Program: ${program}" |& tee -a $log
+echo "Run Number: $runnum" |& tee -a $log
+echo "Outdir: $outdir" |& tee -a $log
+echo "Outroot: $root" |& tee -a $log
+echo "Start Time: `date '+%Y-%m-%d-%I-%M-%S'`" |& tee -a $log
+echo "User: `whoami`" |& tee -a $log
+echo "System Info: `uname -a`" |& tee -a $log
+echo "Working Directory `pwd`" |& tee -a $log
+echo "Input arguments: $args" |& tee -a $log
+echo "FREESURFER_HOME: $FREESURFER_HOME" |& tee -a $log
+echo "Freesurfer Version: `more $FREESURFER_HOME/build-stamp.txt`" |& tee -a $log
+echo "SUBJECTS_DIR: $SUBJECTS_DIR" |& tee -a $log
+echo "FreeSurfer Subject ID: $subj" |& tee -a $log
+echo "FSLDIR: $FSLDIR" |& tee -a $log
+echo "FSL Version: `more $FSLDIR/etc/fslversion`" |& tee -a $log
+echo "" | & tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+
+##############################
+###Diffusion Pre-Processing###
+##############################
+
+set ddir = $outdir/dti
+if ( ! -d $ddir ) mkdir $ddir
+set dout = $ddir/${root}_dti
+
+#Copy over input image to dti directory
+if ( ! -e ${dout}_dist.nii.gz || $?force == 1 ) then
+	set cmd = ( cp ${dti}.nii.gz ${dout}_dist.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Copy over bvals and bvecs
+if ( ! -e ${dout}_bvals.txt || ! -e ${dout}_bvecs.txt || $?force == 1 ) then
+	set cmd = ( cp $bval ${dout}_bvals.txt ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( cp $bvec ${dout}_bvecs.txt ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to extract the b0 frame
+if ( ! -e ${dout}_dist_b0.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslroi ${dout}_dist ${dout}_dist_b0 0 1 )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to calculate a brain mask
+if ( ! -e ${dout}_dist_b0_brain_mask.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/bet ${dout}_dist_b0 ${dout}_dist_b0_brain -m -f $bthresh -R )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to do eddy correction
+if ( ! -e ${dout}_dist_eddy.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/eddy_correct ${dout}_dist ${dout}_dist_eddy 0 )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FreeSurfer to rotate bvecs to accomate eddy correction
+if ( ! -e ${dout}_bvecs_rot.txt || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/xfmrot ${dout}_dist_eddy.ecclog ${dout}_bvecs.txt )
+	set cmd = ( $cmd ${dout}_bvecs_rot.txt )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Calculate a distorted FA map
+if ( ! -e ${dout}_dist_FA.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/dtifit -k ${dout}_dist_eddy -o ${dout}_dist -b $bval --sse  )
+	set cmd = ( $cmd -m ${dout}_dist_b0_brain_mask -r ${dout}_bvecs_rot.txt )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+########################
+###Atlas Registration###
+########################
+
+set adir = $outdir/atlas
+if ( ! -d $adir ) mkdir $adir
+set aout = $adir/$root
+
+#Convert and reorient FreeSurfer images
+foreach free_image ( $SUBJECTS_DIR/$subj/mri/brainmask.mgz $SUBJECTS_DIR/$subj/mri/T1.mgz )	
+	#Use FreeSurferConvert image to nifti
+	if ( ! -e ${aout}_${free_image:r:t}.nii.gz || $?force == 1 ) then
+		set cmd = ( $FREESURFER_HOME/bin/mri_convert $free_image ${aout}_${free_image:r:t}.nii.gz )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to reorient image to MNI standard orientation
+	if ( ! -e ${aout}_${free_image:r:t}_std.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslreorient2std ${aout}_${free_image:r:t} )
+		set cmd = ( $cmd ${aout}_${free_image:r:t}_std )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+end
+
+#Use FreeSurfer to get dti to T1 transform
+if ( ! -e ${aout}_dti_dist_to_free.mat || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/bbregister --mov ${dout}_dist_b0.nii.gz )
+	set cmd = ( $cmd --s $subj --reg ${aout}_dti_dist_to_free.dat --init-fsl --dti )
+	set cmd = ( $cmd --o ${aout}_dti_dist_to_free.nii.gz --fslmat ${aout}_dti_dist_to_free.mat )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to invert dist_dti to T1 transform
+if ( ! -e ${aout}_free_to_dti_dist.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_dist_to_free.mat )
+	set cmd = ( $cmd -omat ${aout}_free_to_dti_dist.mat )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FreeSurfer to get a reorientation to MNI standard matrix
+if ( ! -e ${aout}_free_to_std.mat || $?force == 1 ) then
+	set cmd = ( tkregister2 --mov ${aout}_T1.nii.gz --targ ${aout}_T1_std.nii.gz )
+  	set cmd =  ($cmd --regheader --noedit --fslregout ${aout}_free_to_std.mat )
+  	set cmd = ( $cmd --reg ${aout}_std_to_free_reg )
+  	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to get a reoriented diffusion to free transform
+if ( ! -e ${aout}_dti_dist_to_free_std.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -omat ${aout}_dti_dist_to_free_std.mat )
+	set cmd = ( $cmd -concat  ${aout}_free_to_std.mat ${aout}_dti_dist_to_free.mat  )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to get a free_std to dti transform
+if ( ! -e ${aout}_free_std_to_dti_dist.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_dist_to_free_std.mat )
+	set cmd = ( $cmd -omat ${aout}_free_std_to_dti_dist.mat )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to do a linear registertion between T1 and MNI152
+if ( ! -e ${aout}_free_to_MNI152.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/flirt -in ${aout}_brainmask -omat ${aout}_free_to_MNI152.mat )
+	set cmd = ( $cmd -ref ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	set cmd = ( $cmd -init  ${aout}_free_to_std.mat -o ${aout}_free_to_MNI152_lin )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to do a nonlinear registration between T1 and MNI152
+if ( ! -e ${aout}_free_to_MNI152_coef.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fnirt --in=${aout}_T1 --aff=${aout}_free_to_MNI152.mat )
+	set cmd = ( $cmd --config=T1_2_MNI152_2mm.cnf --iout=${aout}_free_to_MNI152_nonlin )
+	set cmd = ( $cmd --cout=${aout}_free_to_MNI152_coef --jout=${aout}_free_to_MNI152_jac )
+	set cmd = ( $cmd --jacrange=0_1,10 )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to invert warp to get a MNI152 to T1 warp
+if ( ! -e ${aout}_MNI152_to_free_coef.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/invwarp --ref=${aout}_brainmask --warp=${aout}_free_to_MNI152_coef )
+	set cmd = ( $cmd --out=${aout}_MNI152_to_free_coef --force )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+###########################
+###Distortion Correction###
+###########################
+
+#Use FSL to erode FA map for use in FUGUE
+if ( ! -e ${dout}_dist_FA_ero.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_dist_FA -ero ${dout}_dist_FA_ero )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL nonlinear register dti to T1
+if ( ! -e ${aout}_dti_dist_to_free_std_coef.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fnirt --subsamp=8,8,4,4,2,2 --miter=5,5,5,5,5,10 --infwhm=8,6,5,4,2,0 )
+	set cmd = ( $cmd --reffwhm=8,6,5,4,2,0 --lambda=300,150,100,50,40,30 --estint=1,1,1,1,1,0 )
+	set cmd = ( $cmd --intmod=global_non_linear_with_bias --in=${dout}_dist_FA_ero )
+	set cmd = ( $cmd --aff=${aout}_dti_dist_to_free_std.mat --iout=${aout}_dti_dist_to_free_std )
+	set cmd = ( $cmd --cout=${aout}_dti_dist_to_free_std_coef --ref=${aout}_T1_std )
+	set cmd = ( $cmd --applyrefmask=1,1,1,1,1,1 --applyinmask=1 ) 
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to apply undistorted warp to whole DTI series
+if ( ! -e ${dout}_undist_eddy.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/applywarp -i ${dout}_dist_eddy -r ${dout}_dist_b0 -o ${dout}_undist_eddy )
+	set cmd = ( $cmd -w ${aout}_dti_dist_to_free_std_coef --premat=${aout}_free_std_to_dti_dist.mat )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL 
+	
+	
