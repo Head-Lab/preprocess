@@ -22,7 +22,7 @@ if ( $#argv == 0 ) then
 	echo "Required Arguments:"
 	echo "	-bold: <bold> 		Nifti bold run."
 	echo " 	-subj: <subj> 		Freesurfer subject ID."
-	ecoh "	-trep: <TR>			BOLD TR in seconds.
+	echo "	-trep: <TR>		BOLD TR in seconds."
 	echo ""
 	echo "Optional Arguments:"
 	echo "	-root <root>		Root for outputed files. Default is FreeSufer Subject ID"
@@ -31,7 +31,7 @@ if ( $#argv == 0 ) then
 	echo "	-fwhm <fwhm>		Smooth bold data by specified fwhm. Default is 5mm."
 	echo "	-hpass <secs> 		High pass filter in seconds. Default is 50. Use a negative value to skip."
 	echo "	-lpass <secs>		Low pass filter in seconds. Skipped by Default. Use a negative value to skip."
-	echo "	-stc <file>			Turn on slice time correction. Must input a volume ordering file."
+	echo "	-stc <file>		Turn on slice time correction. Must input a volume ordering file."
 	echo "	-wbreg			Turn on whole brain regressor. Off by default."
 	echo "	-force			Run command even if output exists."
 	echo "	-debug			Turn on set echo"
@@ -112,7 +112,7 @@ if ( $?outdir == 0) set outdir = ${root};
 if ( ! -d $outdir ) mkdir -p $outdir
 
 #Create log file
-set log = $outdir/${program}_log
+set log = $outdir/${program}.log
 if ( ! -e $log ) then
 	touch $log
 	set runnum = 1
@@ -179,9 +179,10 @@ if ( ! -e ${bpre}_ref_brain.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-#Use FSL to erode mask for use in normalization and regressing 
+#Use Freesurfer to erode mask for use in normalization and regressing 
 if ( ! -e ${bout}_wb_bold_mask.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslmaths ${bout}_bold_eq_ref_brain_mask -ero -ero ${bout}_wb_bold_mask )
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i ${bout}_bold_eq_ref_brain_mask.nii.gz  )
+	set cmd = ( $cmd --erode 1 --min 1 --zero-edges --o ${bout}_wb_bold_mask.nii.gz )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
@@ -217,7 +218,7 @@ set bpre = "${bpre}_${fwhm}fwhm"
 
 #Use FSL to do grand mean normalization
 if ( ! -e ${bpre}_norm.nii.gz || $?force == 1 ) then
-	set int_fifty = `$FSLDIR/bin/fslstats ${bpre} -k ${bout}_wb_bold_mask -P 50`
+	set int_fifty = `$FSLDIR/bin/fslstats ${bpre} -k ${bout}_wb_bold_mask -p 50`
 	set scale = `echo "scale=5; 10000 / $int_fifty" | bc -l`
 	set cmd = ( $FSLDIR/bin/fslmaths ${bpre} -mul $scale ${bpre}_norm )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
@@ -576,7 +577,7 @@ foreach reg ( lin nonlin )
 end
 
 #Put Everything in a QA webpage
-if ( ! -e ${qout}_${program}_qa_index.html || $?force == 0 ) then
+if ( ! -e ${qout}_${program}_qa_index.html || $?force == 1 ) then
 	echo "Creating QA webpage at: `pwd`/${qout}_${program}_qa_index.html" |& tee -a $log
 	#Create webpages
 	set web_list = ( ${qout}_${program}_qa_mc.html ${qout}_${program}_qa_bmsk.html \
@@ -595,7 +596,10 @@ if ( ! -e ${qout}_${program}_qa_index.html || $?force == 0 ) then
 	#Setup Motion Correction
 	echo "<hr><h2>Motion Correction</h2>" >> ${qout}_${program}_qa_mc.html
 	set reldisp = `cat ${mcf}_rel_mean.rms`; set absdisp = `cat ${mcf}_abs_mean.rms`
+	set mc_outliers = `grep "Found spikes at" $log | tail -1 | sed 's/Found spikes at //g'`
+	if ( "$mc_outliers" == "" ) set mc_outliers = "No outliers found."
 	echo "MCFLIRT Estimated Displacements(mm): Absolute=$absdisp Relative=$reldisp" >> ${qout}_${program}_qa_mc.html
+	echo "<br>fsl_motion_outliers estimated outliers at frames: $mc_outliers" >> ${qout}_${program}_qa_mc.html
 	echo "<p><IMG BORDER=0 SRC=${root}_rot.png>" >> ${qout}_${program}_qa_mc.html
 	echo "<p><IMG BORDER=0 SRC=${root}_trans.png>" >> ${qout}_${program}_qa_mc.html
 	echo "<p><IMG BORDER=0 SRC=${root}_disp.png>" >> ${qout}_${program}_qa_mc.html
