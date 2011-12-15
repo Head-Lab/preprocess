@@ -148,8 +148,8 @@ if ( ! -d $ddir ) mkdir $ddir
 set dout = $ddir/${root}_dti
 
 #Copy over input image to dti directory
-if ( ! -e ${dout}_dist.nii.gz || $?force == 1 ) then
-	set cmd = ( cp ${dti}.nii.gz ${dout}_dist.nii.gz )
+if ( ! -e ${dout}.nii.gz || $?force == 1 ) then
+	set cmd = ( cp ${dti}.nii.gz ${dout}.nii.gz )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
@@ -160,34 +160,34 @@ if ( ! -e ${dout}_bvals.txt || ! -e ${dout}_bvecs.txt || $?force == 1 ) then
 endif
 
 #Use FSL to extract the b0 frame
-if ( ! -e ${dout}_dist_b0.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslroi ${dout}_dist ${dout}_dist_b0 0 1 )
+if ( ! -e ${dout}_b0.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslroi ${dout} ${dout}_b0 0 1 )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 #Use FSL to calculate a brain mask
-if ( ! -e ${dout}_dist_b0_brain_mask.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/bet ${dout}_dist_b0 ${dout}_dist_b0_brain -m -f $bthresh -R )
+if ( ! -e ${dout}_b0_brain_mask.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/bet ${dout}_b0 ${dout}_b0_brain -m -f $bthresh -R )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 #Use FSL to do eddy correction
-if ( ! -e ${dout}_dist_eddy.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/eddy_correct ${dout}_dist ${dout}_dist_eddy 0 )
+if ( ! -e ${dout}_eddy.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/eddy_correct ${dout} ${dout}_eddy 0 )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 #Use FreeSurfer to rotate bvecs to accomate eddy correction
 if ( ! -e ${dout}_bvecs_rot.txt || $?force == 1 ) then
-	set cmd = ( $FREESURFER_HOME/bin/xfmrot ${dout}_dist_eddy.ecclog ${dout}_bvecs.txt )
+	set cmd = ( $FREESURFER_HOME/bin/xfmrot ${dout}_eddy.ecclog ${dout}_bvecs.txt )
 	set cmd = ( $cmd ${dout}_bvecs_rot.txt )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-#Calculate a distorted FA map
-if ( ! -e ${dout}_dist_FA.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/dtifit -k ${dout}_dist_eddy -o ${dout}_dist -b $bval --sse  )
-	set cmd = ( $cmd -m ${dout}_dist_b0_brain_mask -r ${dout}_bvecs_rot.txt )
+#Use FSL to run tensor fit
+if ( ! -e ${dout}_FA.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/dtifit -k ${dout}_eddy -o ${dout} -b $bval --sse  )
+	set cmd = ( $cmd -m ${dout}_b0_brain_mask -r ${dout}_bvecs_rot.txt )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
@@ -216,17 +216,10 @@ foreach free_image ( $SUBJECTS_DIR/$subj/mri/brainmask.mgz $SUBJECTS_DIR/$subj/m
 end
 
 #Use FreeSurfer to get dti to T1 transform
-if ( ! -e ${aout}_dti_dist_to_free.mat || $?force == 1 ) then
-	set cmd = ( $FREESURFER_HOME/bin/bbregister --mov ${dout}_dist_b0.nii.gz )
-	set cmd = ( $cmd --s $subj --reg ${aout}_dti_dist_to_free.dat --init-fsl --dti )
-	set cmd = ( $cmd --o ${aout}_dti_dist_to_free.nii.gz --fslmat ${aout}_dti_dist_to_free.mat )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
-#Use FSL to invert dist_dti to T1 transform
-if ( ! -e ${aout}_free_to_dti_dist.mat || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_dist_to_free.mat )
-	set cmd = ( $cmd -omat ${aout}_free_to_dti_dist.mat )
+if ( ! -e ${aout}_dti_to_free.mat || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/bbregister --mov ${dout}_b0.nii.gz )
+	set cmd = ( $cmd --s $subj --reg ${aout}_dti_to_free.dat --init-fsl --dti )
+	set cmd = ( $cmd --o ${aout}_dti_to_free.nii.gz --fslmat ${aout}_dti_to_free.mat )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
@@ -239,19 +232,40 @@ if ( ! -e ${aout}_free_to_std.mat || $?force == 1 ) then
 endif
 
 #Use FSL to get a reoriented diffusion to free transform
-if ( ! -e ${aout}_dti_dist_to_free_std.mat || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/convert_xfm -omat ${aout}_dti_dist_to_free_std.mat )
-	set cmd = ( $cmd -concat  ${aout}_free_to_std.mat ${aout}_dti_dist_to_free.mat  )
+if ( ! -e ${aout}_dti_to_free_std.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -omat ${aout}_dti_to_free_std.mat )
+	set cmd = ( $cmd -concat  ${aout}_free_to_std.mat ${aout}_dti_to_free.mat  )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to invert dist_dti to T1 transform
+if ( ! -e ${aout}_free_to_dti.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_to_free.mat )
+	set cmd = ( $cmd -omat ${aout}_free_to_dti.mat )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 #Use FSL to get a free_std to dti transform
-if ( ! -e ${aout}_free_std_to_dti_dist.mat || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_dist_to_free_std.mat )
-	set cmd = ( $cmd -omat ${aout}_free_std_to_dti_dist.mat )
+if ( ! -e ${aout}_free_std_to_dti.mat || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_dti_to_free_std.mat )
+	set cmd = ( $cmd -omat ${aout}_free_std_to_dti.mat )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
+#Use FSL to get an eroded FA map for registration purposes
+if ( ! -e ${dout}_FA_ero.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_FA -ero ${dout}_FA_ero ) 
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to nonlinear registration between dti and T1
+if ( ! -e ${aout}_dti_to_free_coef.nii.gz || $?force == 1 ) then
+	#set cmd = ( $FSLDIR/bin/fnirt --in=${dout}_FA_ero --ref=${aout}_T1_std )
+	#set cmd = ( $cmd --aff=${aout}_dti_to_free_std.mat --cout=${aout}_dti_to_free_coef )
+	#set cmd = ( $cmd --iout=${aout}_dti_to_free_warp )
+	#echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+	
 #Use FSL to do a linear registertion between T1 and MNI152
 if ( ! -e ${aout}_free_to_MNI152.mat || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/flirt -in ${aout}_brainmask -omat ${aout}_free_to_MNI152.mat )
@@ -276,34 +290,130 @@ if ( ! -e ${aout}_MNI152_to_free_coef.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-###########################
-###Distortion Correction###
-###########################
+#######################
+###Quality Assurance###
+#######################
 
-#Use FSL to erode FA map for use in FUGUE
-if ( ! -e ${dout}_dist_FA_ero.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_dist_FA -ero ${dout}_dist_FA_ero )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
+set qdir = $outdir/qa
+if ( ! -d $qdir ) mkdir $qdir
+set qout = $qdir/$root
 
-#Use FSL nonlinear register dti to T1
-if ( ! -e ${aout}_dti_dist_to_free_std_coef.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fnirt --subsamp=8,8,4,4,2,2 --miter=5,5,5,5,5,10 --infwhm=8,6,5,4,2,0 )
-	set cmd = ( $cmd --reffwhm=8,6,5,4,2,0 --lambda=300,150,100,50,40,30 --estint=1,1,1,1,1,0 )
-	set cmd = ( $cmd --intmod=global_non_linear_with_bias --in=${dout}_dist_FA_ero )
-	set cmd = ( $cmd --aff=${aout}_dti_dist_to_free_std.mat --iout=${aout}_dti_dist_to_free_std )
-	set cmd = ( $cmd --cout=${aout}_dti_dist_to_free_std_coef --ref=${aout}_T1_std )
-	set cmd = ( $cmd --applyrefmask=1,1,1,1,1,1 --applyinmask=1 ) 
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
-#Use FSL to apply undistorted warp to whole DTI series
-if ( ! -e ${dout}_undist_eddy.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/applywarp -i ${dout}_dist_eddy -r ${dout}_dist_b0 -o ${dout}_undist_eddy )
-	set cmd = ( $cmd -w ${aout}_dti_dist_to_free_std_coef --premat=${aout}_free_std_to_dti_dist.mat )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
-#Use FSL 
+#Use FSL to make motion plots (slightly modified from the following mailing list post by Mark Jenkinson
+#https://www.jiscmail.ac.uk/cgi-bin/webadmin?A2=ind1101&L=FSL&D=0&1=FSL&9=A&J=on&d=No+Match%3BMatch%3BMatches&z=4&P=118462
+if ( ! -e ${qout}_dti_disp.png || ! -e ${qout}_dti_rot.png || ! -e ${qout}_dti_trans.png \
+		|| $?force == 0 ) then
+	echo "Creating Motion Plots..." | tee -a $log 
+	echo -n "" | tee ${qout}_dti_disp.txt ${qout}_dti_rot.txt ${qout}_dti_trans.txt
 	
+	#Extract translations, rotations, and displacements from eddy current log file
+	set lines = `grep -n 'Final' ${dout}_eddy.ecclog | sed 's/:.*//'`
+	foreach line ( $lines )
+		set row1 = `echo $line + 1 | bc`
+		set row2 = `echo $line + 5 | bc`
+		sed -n "${row1},${row2}p" ${dout}_eddy.ecclog > qa_curr.mat
+		if ( $line == 3 ) then
+			cp qa_curr.mat qa_prev.mat; cp qa_curr.mat qa_first.mat
+		endif
+		set absdiff = `$FSLDIR/bin/rmsdiff qa_curr.mat qa_first.mat ${dout}`
+		set reldiff = `$FSLDIR/bin/rmsdiff qa_curr.mat qa_prev.mat ${dout}`
+		cp qa_curr.mat qa_prev.mat
+		echo $absdiff $reldiff >> ${qout}_dti_disp.txt
+		$FSLDIR/bin/avscale --allparams qa_curr.mat ${dout} | grep 'Rotation Angles' | \
+							sed 's/.* = //' >> ${qout}_dti_rot.txt
+		$FSLDIR/bin/avscale --allparams qa_curr.mat ${dout} | grep 'Translations' | \
+							sed 's/.* = //' >> ${qout}_dti_trans.txt
+	end
 	
+	#Create a displcement graph
+	echo "absolute" > ${qout}_dti_disp_labels.txt; echo "relative" >> ${qout}_dti_disp_labels.txt
+	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_disp.txt -l ${qout}_dti_disp_labels.txt )
+	set cmd = ( $cmd -o ${qout}_dti_disp.png )
+	echo $cmd "'-t Estimated Eddy Current Mean Displacments (mm)'"
+	$cmd "'-t Estimated Eddy Current Mean Displacments (mm)'" | tee -a $log
+	
+	#Create rotation graph
+	echo "x" > ${qout}_dti_rot_labels.txt; echo "y" >>${qout}_dti_rot_labels.txt
+	echo "z" >> ${qout}_dti_rot_labels.txt
+	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_rot.txt -l ${qout}_dti_rot_labels.txt )
+	set cmd = ( $cmd -o ${qout}_dti_rot.png )
+	echo $cmd "'-t Estimated Eddy Current Rotations (radians)'"
+	$cmd "'-t Estimated Eddy Current Rotations (radians)'" | tee -a $log
+	
+	#Create translations graph
+	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_trans.txt -l ${qout}_dti_rot_labels.txt )
+	set cmd = ( $cmd -o ${qout}_dti_trans.png )
+	echo $cmd "'-t Estimated Eddy Current Translations (mm)'"
+	$cmd "'-t Estimated Eddy Current Translations (mm)'" | tee -a $log
+	
+	#Create average RMS 
+	cut -f1 -d" " ${qout}_dti_disp.txt | awk '{sum+=$0} END {print sum/NR}' > ${qout}_dti_disp_abs_avg.txt
+	cut -f2 -d" " ${qout}_dti_disp.txt | awk '{sum+=$0} END {print sum/NR}' > ${qout}_dti_disp_rel_avg.txt
+	
+	#Delete leftovers
+	set cmd = ( rm ${qout}_dti_disp_labels.txt ${qout}_dti_rot_labels.txt qa_prev.mat qa_first.mat )
+	set cmd = ( $cmd qa_curr.mat ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Put Everything in a QA webpage
+if ( ! -e ${qout}_${program}_qa_index.html || $?force == 0 ) then
+	echo "Creating QA webpage at: `pwd`/${qout}_${program}_qa_index.html" |& tee -a $log
+	#Create webpages
+	set web_list = ( ${qout}_${program}_qa_mc.html ${qout}_${program}_qa_bmsk.html \
+		  			 ${qout}_${program}_qa_reg.html ${qout}_${program}_qa_sse.html \
+		  			 ${qout}_${program}_qa_index.html )
+	touch $web_list
+	
+	#Setup header
+	echo '<html><body bgcolor="gray">' | tee $web_list > /dev/null
+	echo "<center><h1>${program}: ${subj} Quick QA</center></h1>" | tee -a $web_list > /dev/null
+	echo "<center><a href=${root}_${program}_qa_mc.html>Motion_Correction</a href> - \
+		  <a href=${root}_${program}_qa_bmsk.html>Brain Masking</a href> - \
+		  <a href =${root}_${program}_qa_stdev.html>Tensor Fit SSE</a href> -\
+		  <a href=${root}_${program}_qa_reg.html>Registration</a ref></center> " | tee -a $web_list > /dev/null
+	
+	#Setup Motion Correction
+	echo "<hr><h2>Motion Correction</h2>" >> ${qout}_${program}_qa_mc.html
+	set absdisp = `cat ${qout}_dti_disp_abs_avg.txt`; set reldisp = `cat ${qout}_dti_disp_rel_avg.txt`
+	echo "Eddy Current Estimated Displacements(mm): Absolute=$absdisp Relative=$reldisp" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_dti_rot.png>" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_dti_trans.png>" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_dti_disp.png>" >> ${qout}_${program}_qa_mc.html
+	
+	#Setup Brain Masking
+	echo "<hr><h2>Brain Masking</h2>" >> ${qout}_${program}_qa_bmsk.html
+	echo "Row 1: Mask used for registration (Run using FSL's bet and -f _3 and -R options). \
+		  Row 2: Mask used for normalization and regression (Eroded version of Row 1). \
+		 <p><IMG BORDER=0 SRC=${root}_brain_mask_qa.png>" >> ${qout}_${program}_qa_bmsk.html
+		 
+	#Setup Standard Deviation Image
+	echo "<hr><h2>Standard Deviation Images</h2>" >> ${qout}_${program}_qa_stdev.html
+	echo "Row 1: Before Residual Temporal Standard Deviation. \
+		  Row 2: After Residual Temporal Standard Deviation. \
+		 <p><IMG BORDER=0 SRC=${root}_bold_stdev_qa.png>" >> ${qout}_${program}_qa_stdev.html
+		 
+	#Setup Registration
+	echo "<hr><h2>Registration</h2>" >>  ${qout}_${program}_qa_reg.html
+	set bbcost = `awk '{print $1}' ${aout}_bold_to_free.dat.mincost`
+	echo "BOLD to FreeSurfer T1 - bbregister final cost: $bbcost " >> ${qout}_${program}_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_free_std_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+	echo "<p>Linear Registration of FreeSurfer T1 to MNI152 2MM" >> ${qout}_${program}_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_lin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+	echo "<p>Linear Registration of BOLD to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_MNI152_lin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+	echo "<p>Nonlinear Registration of Freesurfer T1 to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_nonlin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+	echo "<p>Nonlinear Registration of BOLD to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_MNI152_nonlin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+endif
+
+echo "" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+echo "${program} is DONE" |& tee -a $log
+echo "End Time: `date '+%Y-%m-%d-%I-%M-%S'`" |& tee -a $log
+echo "" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+
+

@@ -407,21 +407,21 @@ endif
 set qdir = $outdir/qa; if ( ! -d $qdir ) mkdir $qdir; set qout = $qdir/$root
 
 #Use FSL to create motion plots
-if ( ! -e ${qout}_rot.png || ! -e ${qout}_trans.png || ! -e ${qout}_disp.png || $?force == 1 ) then
+if ( ! -e ${qout}_bold_rot.png || ! -e ${qout}_bold_trans.png || ! -e ${qout}_bold_disp.png || $?force == 1 ) then
 	#Rotation Plot
 	set cmd = ( ${FSLDIR}/bin/fsl_tsplot -i ${mcf}.par -u 1 --start=1 --finish=3 )
-	set cmd = ( $cmd -a x,y,z -w 640 -h 144 -o ${qout}_rot.png )
+	set cmd = ( $cmd -a x,y,z -w 640 -h 144 -o ${qout}_bold_rot.png )
 	echo $cmd -t 'Estimated rotations (radians)' |& tee -a $log
 	$cmd -t 'Estimated rotations (radians)' |& tee -a $log
 	
 	#Translation Plot
 	set cmd = ( ${FSLDIR}/bin/fsl_tsplot -i ${mcf}.par -u 1 --start=4 --finish=6 )
-	set cmd = ( $cmd -a x,y,z -w 640 -o ${qout}_trans.png -h 144 )
+	set cmd = ( $cmd -a x,y,z -w 640 -o ${qout}_bold_trans.png -h 144 )
 	echo $cmd -t 'Estimated translations (mm)' |& tee -a $log
 	$cmd -t 'Estimated translations (mm)' |& tee -a $log
 	
 	#Displacement Plot
-	set cmd = ( ${FSLDIR}/bin/fsl_tsplot -a absolute,relative -o ${qout}_disp.png )
+	set cmd = ( ${FSLDIR}/bin/fsl_tsplot -a absolute,relative -o ${qout}_bold_disp.png )
 	set cmd = ( $cmd -i ${mcf}_abs.rms,${mcf}_rel.rms -u 1 -w 640 -h 144 )
 	echo $cmd -t 'Estimated mean displacement (mm)' |& tee -a $log
 	$cmd -t 'Estimated mean displacement (mm)' |& tee -a $log
@@ -600,9 +600,9 @@ if ( ! -e ${qout}_${program}_qa_index.html || $?force == 1 ) then
 	if ( "$mc_outliers" == "" ) set mc_outliers = "No outliers found."
 	echo "MCFLIRT Estimated Displacements(mm): Absolute=$absdisp Relative=$reldisp" >> ${qout}_${program}_qa_mc.html
 	echo "<br>fsl_motion_outliers estimated outliers at frames: $mc_outliers" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_rot.png>" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_trans.png>" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_disp.png>" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_rot.png>" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_trans.png>" >> ${qout}_${program}_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_disp.png>" >> ${qout}_${program}_qa_mc.html
 	
 	#Setup Brain Masking
 	echo "<hr><h2>Brain Masking</h2>" >> ${qout}_${program}_qa_bmsk.html
