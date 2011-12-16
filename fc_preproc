@@ -157,13 +157,19 @@ if ( ! -e ${bout}_bold.nii.gz || $?force == 1 ) then
 endif
 set bpre = "${bout}_bold"
 
-#Use FSL to remove 6 frames
+#Use FSL to remove 4 frames
 if ( ! -e ${bpre}_eq.nii.gz || $?force == 1 ) then
-	@ vols = `$FSLDIR/bin/fslval ${bpre} dim4` - 6
-	set cmd = ( $FSLDIR/bin/fslroi ${bpre} ${bpre}_eq 6 $vols )
+	@ vols = `$FSLDIR/bin/fslval ${bpre} dim4` - 4
+	set cmd = ( $FSLDIR/bin/fslroi ${bpre} ${bpre}_eq 4 $vols )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 set bpre = "${bpre}_eq"
+
+#Use FSL to get bold standard deviation image
+if ( ! -e ${bpre}_stdev.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslmaths ${bpre} -Tstd ${bpre}_stdev )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
 
 #Use FSL to extract reference frame
 set nvols = `$FSLDIR/bin/fslval ${bpre} dim4`
@@ -233,12 +239,6 @@ if ( ! -e ${bpre}_bptf.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 set bpre = "${bpre}_bptf"
-
-#Use FSL to get bold standard deviation image
-if ( ! -e ${bpre}_stdev.nii.gz || $?force == 1 ) then
-		set cmd = ( $FSLDIR/bin/fslmaths ${bpre} -Tstd ${bpre}_stdev )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
 
 ########################
 ###Atlas Registration###
@@ -460,7 +460,7 @@ endif
 #Use FSL to get bold standard deviation QA
 if ( ! -e ${qout}_bold_stdev_qa.png ) then
 	#Get before residual qa image
-	set cmd = ( $FSLDIR/bin/slicer ${bpre}_stdev $sliceropts )
+	set cmd = ( $FSLDIR/bin/slicer ${bout}_bold_eq_stdev $sliceropts )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_stdev_qa1.png )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
