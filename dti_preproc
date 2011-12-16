@@ -96,11 +96,6 @@ if ( ! -e $SUBJECTS_DIR/$subj ) then
 	exit 1
 endif
 
-#Make sure there is an fsaverage in the SUBJECTS_DIR
-if ( ! -d $SUBJECTS_DIR/fsaverage ) then
-	ln -s $FREESURFER_HOME/subjects/fsaverage $SUBJECTS_DIR/fsaverage
-endif
-
 #Setup output
 if ( $?root == 0 ) set root = $subj
 if ( $?outdir == 0) set outdir = ${root};
