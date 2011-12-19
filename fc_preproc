@@ -20,27 +20,33 @@ if ( $#argv == 0 ) then
 	echo "Usage:"
 	echo ""
 	echo "Required Arguments:"
-	echo "	-bold: <bold> 		Nifti bold run."
+	echo "	-bold: <bold> 		Nifti bold image."
 	echo " 	-subj: <subj> 		Freesurfer subject ID."
-	echo "	-trep: <TR>		BOLD TR in seconds."
+	echo "	-mag: <mag>		Nifti field map magnitude image."
+	echo "	-phase: <phase>		Nifti field map phase image."
+	echo "	-te: <te>		Bold echo time."
+	echo "	-dwell: <dwell>		Diffusion dwell time."
+	echo "	-delta: <delta>		Difference between field map echo times."
 	echo ""
 	echo "Optional Arguments:"
+	echo "	-nodist			No distortion correction. No longer need to specify -mag, -phase, -te, -dwell, and -delta."		
 	echo "	-root <root>		Root for outputed files. Default is FreeSufer Subject ID"
+	echo "	-bthresh <thresh>	Threshold for BET masking. Default is 0.1."
 	echo '	-subjdir <dir>		FreeSurfer subjects directory. Default is current.'
 	echo "	-outdir <outdir>	Output directory. Default is <root>"
 	echo "	-fwhm <fwhm>		Smooth bold data by specified fwhm. Default is 5mm."
 	echo "	-hpass <secs> 		High pass filter in seconds. Default is 50. Use a negative value to skip."
 	echo "	-lpass <secs>		Low pass filter in seconds. Skipped by Default. Use a negative value to skip."
-	echo "	-stc <file>		Turn on slice time correction. Must input a volume ordering file."
+	echo "	-stcf <file>		Turn on slice time correction. Must input a volume ordering file."
 	echo "	-wbreg			Turn on whole brain regressor. Off by default."
 	echo "	-force			Run command even if output exists."
-	echo "	-debug			Turn on set echo"
+	echo "	-debug			Turn on set echo."
 	echo ""
 	exit
 endif
 
 #Set defaults
-set fwhm = 5; set hpass = 50; set lpass = -1.0;
+set fwhm = 5; set hpass = 50; set lpass = -1.0; set bthresh = 0.1;
 
 #Parse arguments
 set args = ( $argv )
@@ -55,12 +61,26 @@ while ( $#argv > 0 )
 			set root = $argv[1]; shift; breaksw;
 		case -fwhm:
 			set fwhm = $argv[1]; shift; breaksw;
-		case -stc:
+		case -stcf:
 			if ( ! -e $argv[1] ) then
 				echo "Cannot find -stcf file at $argv[1]."
 				exit 1
 			endif
-			set stc = $argv[1]; shift; breaksw;
+			set stcf = $argv[1]; shift; breaksw;
+		case -mag:
+			set mag = `$FSLDIR/bin/remove_ext $argv[1]`; shift; breaksw;
+		case -phase:
+			set phase = `$FSLDIR/bin/remove_ext $argv[1]`; shift; breaksw;
+		case -te:
+			set te = $argv[1]; shift; breaksw;
+		case -dwell:
+			set dwell = $argv[1]; shift; breaksw;
+		case -delta:
+			set delta = $argv[1]; shift; breaksw;
+		case -nodist:
+			set nodist = 1; breaksw;
+		case -bthresh:
+			set bthresh = $argv[1]; shift; breaksw;
 		case -trep:
 			set trep = $argv[1]; shift; breaksw;
 		case -hpass:
@@ -91,6 +111,16 @@ if ( $?debug == 1 ) set echo
 
 #Check to make sure all required options have been set
 if ( $?bold == 0 || $?subj == 0 || $?trep == 0 ) then
+	echo "Missing required arguments. See usage."
+	exit 1
+endif
+
+#Check to make sure all required options have been set
+if ( $?nodist == 1 && ( $?bold == 0 || $?subj == 0 || $?trep == 0 ) ) then
+	echo "Missing required arguments. See usage."
+	exit 1
+else if ( $?bold == 0 || $?subj == 0 || $?trep == 0 || $?mag == 0 || $?phase == 0 || $?te == 0 \
+		|| $?dwell == 0 || $?delta == 0 ) then
 	echo "Missing required arguments. See usage."
 	exit 1
 endif
@@ -171,56 +201,105 @@ if ( ! -e ${bpre}_stdev.nii.gz || $?force == 1 ) then
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-#Use FSL to extract reference frame
-set nvols = `$FSLDIR/bin/fslval ${bpre} dim4`
-set refvol = `echo "$nvols / 2" | bc`
-if ( ! -e ${bpre}_ref.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslroi ${bpre} ${bpre}_ref.nii.gz $refvol 1 )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
-#Use FSL to get brain mask from reference frame
-if ( ! -e ${bpre}_ref_brain.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/bet ${bpre}_ref ${bpre}_ref_brain -F )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
-#Use Freesurfer to erode mask for use in normalization and regressing 
-if ( ! -e ${bout}_wb_bold_mask.nii.gz || $?force == 1 ) then
-	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i ${bout}_bold_eq_ref_brain_mask.nii.gz  )
-	set cmd = ( $cmd --erode 1 --min 1 --zero-edges --o ${bout}_wb_bold_mask.nii.gz )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
 #If user wants, use FSL to due slicetime correction
-if ( $?stc == 1 && ( ! -e ${bpre}_stc.nii.gz || $?force == 1 ) ) then
+if ( $?stcf == 1 && ( ! -e ${bpre}_stc.nii.gz || $?force == 1 ) ) then
 	set cmd = ( $FSLDIR/bin/slicetimer -i ${bpre} -o ${bpre}_stc --ocustom=$stcf -r $trep )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	set bpre = "${bpre}_stc"
 endif
 
-#Use FSL to do motion correction
-if ( ! -d ${bpre}_mcf.mat || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/mcflirt -in ${bpre} -refvol $refvol -mats -plots -rmsrel -rmsabs )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-set bpre = "${bpre}_mcf"
-set mcf = "${bpre}"
+if ( $?nodist == 0 ) then
+	#Make folders for distortion correction
+	set udir = $bdir/undist; if ( ! -d $udir ) mkdir $udir; set uout = $udir/${root}
+	
+	#Calculat middle frame
+	set nvols = `$FSLDIR/bin/fslval ${bpre} dim4`
+	set refvol = `echo "$nvols / 2" | bc`
+	
+	#Run distortion/motion correction
+	if ( ! -e ${uout}_epi_undist_mcf.nii.gz || $?force == 1 ) then
+		set cmd = ( epi_unwarp -m $mag -p $phase -e ${bpre} -dwell $dwell -te $te -delta $delta )
+		set cmd = ( $cmd -epibet $bthresh -boldmc -o $udir -r ${root} -debug -ref $refvol )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bpre = "${bpre}_undist_mcf"
+	set mcf = "${bpre}"
+	
+	#Copy over undistorted reference
+	if ( ! -e ${bpre}_ref.nii.gz || $?force == 1 ) then
+			set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_${refvol}_undist ${bpre}_ref.nii.gz )
+			echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Copy over brain mask (generated from magnitude image)
+	if ( ! -e ${bpre}_ref_brain_mask.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/imcp ${uout}_mag_brain_mask_to_${root}_epi_0_brain )
+		set cmd = ( $cmd ${bpre}_ref_brain_mask )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bold_mask = "${bpre}_ref_brain_mask.nii.gz"
+	
+	#Apply brain mask
+	if ( ! -e ${bpre}_ref_brain.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslmaths ${bpre}_ref -mas ${bpre}_ref_brain_mask ${bpre}_ref_brain )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bold_ref = "${bpre}_ref_brain.nii.gz"
+	
+	#Copy over the whole undistorted series
+	if ( ! -e ${bpre}_brain.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_undist_mcf ${dout}_eddy )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bpre = "${bpre}_brain"
+else
 
-#Use FSL to mask 4D data
-if ( ! -e ${bpre}_brain.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslmaths ${bpre} -mas ${bout}_bold_eq_ref_brain_mask ${bpre}_brain )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	#Use FSL to extract reference frame
+	set nvols = `$FSLDIR/bin/fslval ${bpre} dim4`
+	set refvol = `echo "$nvols / 2" | bc`
+	if ( ! -e ${bpre}_ref.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslroi ${bpre} ${bpre}_ref.nii.gz $refvol 1 )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+
+	#Use FSL to get brain mask from reference frame
+	if ( ! -e ${bpre}_ref_brain.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/bet ${bpre}_ref ${bpre}_ref_brain -F )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bold_ref = "${bpre}_ref_brain.nii.gz"
+	set bold_mask = "${bpre}_ref_brain_mask.nii.gz"
+
+	#Use FSL to do motion correction
+	if ( ! -d ${bpre}_mcf.mat || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/mcflirt -in ${bpre} -refvol $refvol -mats -plots -rmsrel -rmsabs )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bpre = "${bpre}_mcf"
+	set mcf = "${bpre}"
+
+	#Use FSL to mask 4D data
+	if ( ! -e ${bpre}_brain.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslmaths ${bpre} -mas $bold_mask ${bpre}_brain )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set bpre = "${bpre}_brain"
 endif
-set bpre = "${bpre}_brain"
 
 #Use Fresurfer to spatially smooth data by specified fwhm
 if ( ! -e ${bpre}_${fwhm}fwhm.nii.gz || $?force == 1 ) then
 	set cmd = ( $FREESURFER_HOME/bin/mri_fwhm --i ${bpre}.nii.gz --o ${bpre}_${fwhm}fwhm.nii.gz )
-	set cmd = ( $cmd --mask ${bout}_bold_eq_ref_brain_mask.nii.gz --smooth-only --fwhm 5 )
+	set cmd = ( $cmd --mask $bold_mask --smooth-only --fwhm 5 )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 set bpre = "${bpre}_${fwhm}fwhm"
+
+#Use Freesurfer to erode mask for use in normalization and regressing 
+if ( ! -e ${bout}_wb_bold_mask.nii.gz || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $mask  --erode 1 --min 1 )
+	set cmd = ( $cmd --zero-edges --o ${bout}_wb_bold_mask.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
 
 #Use FSL to do grand mean normalization
 if ( ! -e ${bpre}_norm.nii.gz || $?force == 1 ) then
@@ -263,7 +342,7 @@ end
 
 #Use FreeSurfer to get bold to T1 transform
 if ( ! -e ${aout}_bold_to_free.mat || $?force == 1 ) then
-	set cmd = ( $FREESURFER_HOME/bin/bbregister --mov ${bout}_bold_eq_ref_brain.nii.gz )
+	set cmd = ( $FREESURFER_HOME/bin/bbregister --mov $bold_ref )
 	set cmd = ( $cmd --s $subj --reg ${aout}_bold_to_free.dat --init-fsl --bold )
 	set cmd = ( $cmd --o ${aout}_bold_to_free.nii.gz --fslmat ${aout}_bold_to_free.mat )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
@@ -291,27 +370,44 @@ if ( ! -e ${aout}_bold_to_free_std.mat || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-#Use FSL to get a free_std to bold transform
-if ( ! -e ${aout}_free_std_to_bold.mat || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/convert_xfm -inverse ${aout}_bold_to_free_std.mat )
-	set cmd = ( $cmd -omat ${aout}_free_std_to_bold.mat )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-endif
-
 #Use FSL to do a linear registertion between T1 and MNI152
 if ( ! -e ${aout}_free_to_MNI152.mat || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/flirt -in ${aout}_brainmask -omat ${aout}_free_to_MNI152.mat )
 	set cmd = ( $cmd -ref ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-	set cmd = ( $cmd -init  ${aout}_free_to_std.mat -o ${aout}_free_to_MNI152_lin )
+	set cmd = ( $cmd -init  ${aout}_free_to_std.mat -o ${aout}_free_warped_to_MNI152 )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 #Use FSL to do a nonlinear registration between T1 and MNI152
 if ( ! -e ${aout}_free_to_MNI152_coef.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/fnirt --in=${aout}_T1 --aff=${aout}_free_to_MNI152.mat )
-	set cmd = ( $cmd --config=T1_2_MNI152_2mm.cnf --iout=${aout}_free_to_MNI152_nonlin )
+	set cmd = ( $cmd --config=T1_2_MNI152_2mm.cnf --jacrange=0_1,10 )
 	set cmd = ( $cmd --cout=${aout}_free_to_MNI152_coef --jout=${aout}_free_to_MNI152_jac )
-	set cmd = ( $cmd --jacrange=0_1,10 )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to apply nonlinear registration to brainmask
+if ( ! -e ${aout}_free_warped_to_MNI152.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/applywarp --in=${aout}_brainmask --out=${aout}_free_warped_to_MNI152 )
+	set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	set cmd = ( $cmd --warp=${aout}_free_to_MNI152_coef )
+	set cmd = ( $cmd --mask=${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to apply nonlinear registration to DTI data
+if ( ! -e ${aout}_bold_warped_to_MNI152.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/applywarp --in=$bold_ref --out=${aout}_bold_warped_to_MNI152 )
+	set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	set cmd = ( $cmd --premat=${aout}_bold_to_free.mat --warp=${aout}_free_to_MNI152_coef )
+	set cmd = ( $cmd --mask=${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to upscale FreeSurfer brainmask in order to speed up invwarp
+if ( ! -e ${aout}_brainmask_2mm.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/flirt -in ${aout}_brainmask -ref ${aout}_brainmask )
+	set cmd = ( $cmd -applyisoxfm 2 -o ${aout}_brainmask_2mm )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
@@ -319,6 +415,13 @@ endif
 if ( ! -e ${aout}_MNI152_to_free_coef.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/invwarp --ref=${aout}_brainmask --warp=${aout}_free_to_MNI152_coef )
 	set cmd = ( $cmd --out=${aout}_MNI152_to_free_coef --force )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+#Use FSL to get a warp from MNI152 space to BOLD space
+if ( ! -e ${aout}_MNI152_to_bold_coef.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convertwarp --warp1=${aout}_MNI152_to_free_coef --ref=$bold_ref )
+	set cmd = ( $cmd --postmat=${aout}_free_to_bold.mat --out=${aout}_MNI152_to_bold_coef )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 		
@@ -435,22 +538,22 @@ set appendopts = ( sla.png + slb.png + slc.png + sld.png + sle.png + slf.png + s
 					+ sli.png + slj.png + slk.png + sll.png )
 
 #Use FSL to get brain mask QA image
-if ( ! -e ${qout}_brain_mask_qa.png || $?force == 1 ) then
+if ( ! -e ${qout}_bold_brain_mask_qa.png || $?force == 1 ) then
 	#Get non-eroded qa image
-	set cmd = ( $FSLDIR/bin/slicer ${bout}_bold_eq_ref ${bout}_bold_eq_ref_brain_mask $sliceropts )
+	set cmd = ( $FSLDIR/bin/slicer ${bout}_bold_eq_ref $bold_mask $sliceropts )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_brain_mask_nonero_qa.png )
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_brain_mask_nonero_qa.png )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Get eroded brainmask image
 	set cmd = ( $FSLDIR/bin/slicer ${bout}_bold_eq_ref ${bout}_wb_bold_mask $sliceropts )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_wb_bold_mask_qa.png )
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_wb_bold_mask_qa.png )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Combine QA images
-	set cmd = ( $FSLDIR/bin/pngappend ${qout}_brain_mask_nonero_qa.png )
-	set cmd = ( $cmd - ${qout}_wb_bold_mask_qa.png ${qout}_brain_mask_qa.png )
+	set cmd = ( $FSLDIR/bin/pngappend ${qout}_bold_brain_mask_nonero_qa.png )
+	set cmd = ( $cmd - ${qout}_bold_wb_bold_mask_qa.png ${qout}_bold_brain_mask_qa.png )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Cleanup
@@ -509,80 +612,62 @@ if ( ! -e ${qout}_bold_to_free_std_qa.png || $?force == 1 ) then
 endif
 
 #Use FSL to get free to MNI 152 space QA
-foreach reg ( lin nonlin )
-	if ( ! -e ${qout}_free_to_MNI152_${reg}_qa.png || $?force == 1 ) then
-		#Use FSL to get free to MNI152 QA (MNI Outlines)
-		set cmd = ( $FSLDIR/bin/slicer ${aout}_free_to_MNI152_${reg} )
-		set cmd = ( $cmd ${FSLDIR}/data/standard/MNI152_T1_2mm_brain $sliceropts )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_free_to_MNI152_${reg}_qa1.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+if ( ! -e ${qout}_free_to_MNI152_qa.png || $?force == 1 ) then
+	#Use FSL to get free to MNI152 QA (MNI Outlines)
+	set cmd = ( $FSLDIR/bin/slicer ${aout}_free_to_MNI152_nolin )
+	set cmd = ( $cmd ${FSLDIR}/data/standard/MNI152_T1_2mm_brain $sliceropts )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_free_to_MNI152_qa1.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
-		#Use FSL to get free to MNI 152 QA (free standard outlines)
-		set cmd = ( $FSLDIR/bin/slicer ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-		set cmd = ( $cmd ${aout}_free_to_MNI152_${reg} $sliceropts )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_free_to_MNI152_${reg}_qa2.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	#Use FSL to get free to MNI 152 QA (free standard outlines)
+	set cmd = ( $FSLDIR/bin/slicer ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	set cmd = ( $cmd ${aout}_free_warped_to_MNI152 $sliceropts )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_free_to_MNI152_qa2.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
-		#Combine QA Images
-		set cmd = ( $FSLDIR/bin/pngappend ${qout}_free_to_MNI152_${reg}_qa1.png )
-		set cmd = ( $cmd - ${qout}_free_to_MNI152_${reg}_qa2.png ${qout}_free_to_MNI152_${reg}_qa.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log	
+	#Combine QA Images
+	set cmd = ( $FSLDIR/bin/pngappend ${qout}_free_to_MNI152_qa1.png )
+	set cmd = ( $cmd - ${qout}_free_to_MNI152_qa2.png ${qout}_free_to_MNI152_qa.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log	
 	
-		#Cleanup
-		echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
-	endif
-end
+	#Cleanup
+	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+endif
 
 #Use FSL to get bold to MNI 152 space QA
-foreach reg ( lin nonlin )
-	if ( ! -e ${qout}_bold_to_MNI152_${reg}_qa.png || $?force == 1 ) then
-		if ( $reg == "nonlin" ) then
-			#Use FSL to warp bold to MNI152 space
-			set cmd = ( $FSLDIR/bin/applywarp -r ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-			set cmd = ( $cmd -i ${bout}_bold_eq_ref -w ${aout}_free_to_MNI152_coef )
-			set cmd = ( $cmd -o ${qout}_bold_eq_ref_to_MNI152_nonlin --premat=${aout}_bold_to_free.mat )
-			echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		else 
-			#Use FSL to transform bold to MNI152 space
-			set cmd = ( $FSLDIR/bin/applywarp -i ${bout}_bold_eq_ref --premat=${aout}_bold_to_free.mat )
-			set cmd = ( $cmd --postmat=${aout}_free_to_MNI152.mat -o ${qout}_bold_eq_ref_to_MNI152_lin )
-			set cmd = ( $cmd -r ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-			echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		endif
-		
-		#Use FSL to get free to MNI152 QA (MNI Outlines)
-		set cmd = ( $FSLDIR/bin/slicer ${qout}_bold_eq_ref_to_MNI152_${reg} )
-		set cmd = ( $cmd ${FSLDIR}/data/standard/MNI152_T1_2mm_brain $sliceropts )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_to_MNI152_${reg}_qa1.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+if ( ! -e ${qout}_bold_to_MNI152_qa.png || $?force == 1 ) then
+	#Use FSL to get free to MNI152 QA (MNI Outlines)
+	set cmd = ( $FSLDIR/bin/slicer ${qout}_bold_warped_to_MNI152)
+	set cmd = ( $cmd ${FSLDIR}/data/standard/MNI152_T1_2mm_brain $sliceropts )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_to_MNI152_qa1.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
-		#Use FSL to get free to MNI 152 QA (free standard outlines)
-		set cmd = ( $FSLDIR/bin/slicer ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-		set cmd = ( $cmd ${qout}_bold_eq_ref_to_MNI152_${reg} $sliceropts )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_to_MNI152_${reg}_qa2.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	#Use FSL to get free to MNI 152 QA (free standard outlines)
+	set cmd = ( $FSLDIR/bin/slicer ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	set cmd = ( $cmd ${qout}_bold_warped_to_MNI152 $sliceropts )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_bold_to_MNI152_qa2.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
-		#Combine QA Images
-		set cmd = ( $FSLDIR/bin/pngappend ${qout}_bold_to_MNI152_${reg}_qa1.png )
-		set cmd = ( $cmd - ${qout}_bold_to_MNI152_${reg}_qa2.png ${qout}_bold_to_MNI152_${reg}_qa.png )
-		echo $cmd |& tee -a $log; $cmd |& tee -a $log	
+	#Combine QA Images
+	set cmd = ( $FSLDIR/bin/pngappend ${qout}_bold_to_MNI152_qa1.png )
+	set cmd = ( $cmd - ${qout}_bold_to_MNI152_qa2.png ${qout}_bold_to_MNI152_qa.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log	
 	
-		#Cleanup
-		echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
-	endif
-end
+	#Cleanup
+	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+endif
 
 #Put Everything in a QA webpage
-if ( ! -e ${qout}_${program}_qa_index.html || $?force == 1 ) then
-	echo "Creating QA webpage at: `pwd`/${qout}_${program}_qa_index.html" |& tee -a $log
+if ( ! -e ${qout}_bold_qa_index.html || $?force == 1 ) then
+	echo "Creating QA webpage at: `pwd`/${qout}_bold_qa_index.html" |& tee -a $log
 	#Create webpages
-	set web_list = ( ${qout}_${program}_qa_mc.html ${qout}_${program}_qa_bmsk.html \
-		  			 ${qout}_${program}_qa_reg.html ${qout}_${program}_qa_stdev.html \
-		  			 ${qout}_${program}_qa_index.html )
+	set web_list = ( ${qout}_bold_qa_mc.html ${qout}_bold_qa_bmsk.html \
+		  			 ${qout}_bold_qa_reg.html ${qout}_bold_qa_stdev.html \
+		  			 ${qout}_bold_qa_index.html )
 	touch $web_list
 	
 	#Setup header
@@ -594,41 +679,37 @@ if ( ! -e ${qout}_${program}_qa_index.html || $?force == 1 ) then
 		  <a href=${root}_${program}_qa_reg.html>Registration</a ref></center> " | tee -a $web_list > /dev/null
 	
 	#Setup Motion Correction
-	echo "<hr><h2>Motion Correction</h2>" >> ${qout}_${program}_qa_mc.html
+	echo "<hr><h2>Motion Correction</h2>" >> ${qout}_bold_qa_mc.html
 	set reldisp = `cat ${mcf}_rel_mean.rms`; set absdisp = `cat ${mcf}_abs_mean.rms`
 	set mc_outliers = `grep "Found spikes at" $log | tail -1 | sed 's/Found spikes at //g'`
 	if ( "$mc_outliers" == "" ) set mc_outliers = "No outliers found."
-	echo "MCFLIRT Estimated Displacements(mm): Absolute=$absdisp Relative=$reldisp" >> ${qout}_${program}_qa_mc.html
-	echo "<br>fsl_motion_outliers estimated outliers at frames: $mc_outliers" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_rot.png>" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_trans.png>" >> ${qout}_${program}_qa_mc.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_disp.png>" >> ${qout}_${program}_qa_mc.html
+	echo "MCFLIRT Estimated Displacements(mm): Absolute=$absdisp Relative=$reldisp" >> ${qout}_bold_qa_mc.html
+	echo "<br>fsl_motion_outliers estimated outliers at frames: $mc_outliers" >> ${qout}_bold_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_rot.png>" >> ${qout}_bold_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_trans.png>" >> ${qout}_bold_qa_mc.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_disp.png>" >> ${qout}_bold_qa_mc.html
 	
 	#Setup Brain Masking
-	echo "<hr><h2>Brain Masking</h2>" >> ${qout}_${program}_qa_bmsk.html
+	echo "<hr><h2>Brain Masking</h2>" >> ${qout}_bold_qa_bmsk.html
 	echo "Row 1: Mask used for registration (Run using FSL's bet and -f _3 and -R options). \
 		  Row 2: Mask used for normalization and regression (Eroded version of Row 1). \
-		 <p><IMG BORDER=0 SRC=${root}_brain_mask_qa.png>" >> ${qout}_${program}_qa_bmsk.html
+		 <p><IMG BORDER=0 SRC=${root}_bold_brain_mask_qa.png>" >> ${qout}_bold_qa_bmsk.html
 		 
 	#Setup Standard Deviation Image
-	echo "<hr><h2>Standard Deviation Images</h2>" >> ${qout}_${program}_qa_stdev.html
+	echo "<hr><h2>Standard Deviation Images</h2>" >> ${qout}_bold_qa_stdev.html
 	echo "Row 1: Before Residual Temporal Standard Deviation. \
 		  Row 2: After Residual Temporal Standard Deviation. \
-		 <p><IMG BORDER=0 SRC=${root}_bold_stdev_qa.png>" >> ${qout}_${program}_qa_stdev.html
+		 <p><IMG BORDER=0 SRC=${root}_bold_stdev_qa.png>" >> ${qout}_bold_qa_stdev.html
 		 
 	#Setup Registration
-	echo "<hr><h2>Registration</h2>" >>  ${qout}_${program}_qa_reg.html
+	echo "<hr><h2>Registration</h2>" >>  ${qout}_bold_qa_reg.html
 	set bbcost = `awk '{print $1}' ${aout}_bold_to_free.dat.mincost`
-	echo "BOLD to FreeSurfer T1 - bbregister final cost: $bbcost " >> ${qout}_${program}_qa_reg.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_free_std_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
-	echo "<p>Linear Registration of FreeSurfer T1 to MNI152 2MM" >> ${qout}_${program}_qa_reg.html
-	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_lin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
-	echo "<p>Linear Registration of BOLD to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_MNI152_lin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
-	echo "<p>Nonlinear Registration of Freesurfer T1 to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
-	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_nonlin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
-	echo "<p>Nonlinear Registration of BOLD to MNI152 T1 2MM" >> ${qout}_${program}_qa_reg.html
-	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_MNI152_nonlin_qa.png WIDTH=2000>" >> ${qout}_${program}_qa_reg.html
+	echo "BOLD to FreeSurfer T1 - bbregister final cost: $bbcost " >> ${qout}_bold_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_free_std_qa.png WIDTH=2000>" >> ${qout}_bold_qa_reg.html
+	echo "<p>Nonlinear Registration of Freesurfer T1 to MNI152 T1 2MM" >> ${qout}_bold_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_qa.png WIDTH=2000>" >> ${qout}_bold_qa_reg.html
+	echo "<p>Nonlinear Registration of BOLD to MNI152 T1 2MM" >> ${qout}_bold_qa_reg.html
+	echo "<p><IMG BORDER=0 SRC=${root}_bold_to_MNI152_qa.png WIDTH=2000>" >> ${qout}_bold_qa_reg.html
 endif
 
 echo "" |& tee -a $log
