@@ -244,7 +244,7 @@ endif
 
 #Use FSL to run tensor fit
 if ( ! -e ${dout}_FA.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/dtifit -k ${dout}_eddy -o ${dout} -b $bval --sse  )
+	set cmd = ( $FSLDIR/bin/dtifit -k ${dout}_eddy -o ${dout} -b ${dout}_bvals.txt --sse  )
 	set cmd = ( $cmd -m ${dout}_b0_brain_mask -r ${dout}_bvecs_rot.txt )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
