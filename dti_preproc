@@ -180,7 +180,7 @@ if ( $?nodist == 0 ) then
 	#Run distortion/eddy current correction
 	if ( ! -e ${uout}_epi_undist_mcf.nii.gz || $?force == 1 ) then
 		set cmd = ( epi_unwarp -m $mag -p $phase -e ${dout} -dwell $dwell -te $te -delta $delta )
-		set cmd = ( $cmd -epibet $bthresh -dtimc -o $udir -r ${root} -debug )
+		set cmd = ( $cmd -epibet $bthresh -dtimc -o $udir -r ${root} -dir y -debug )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 
