@@ -190,9 +190,9 @@ if ( $?nodist == 0 ) then
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 	
-	#Copy over brain mask (generated from magnitude image)
+	#Dilate magnitude brain mask
 	if ( ! -e ${dout}_b0_brain_mask.nii.gz || $?force == 1 ) then
-		set cmd = ( $FSLDIR/bin/imcp ${uout}_mag_brain_mask_to_${root}_epi_0_brain )
+		set cmd = ( $FSLDIR/bin/fslmaths ${uout}_mag_brain_mask_to_${root}_epi_0_brain -dilM -ero )
 		set cmd = ( $cmd ${dout}_b0_brain_mask )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
