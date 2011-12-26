@@ -180,7 +180,7 @@ if ( $?nodist == 0 ) then
 	#Run distortion/eddy current correction
 	if ( ! -e ${uout}_epi_undist_mcf.nii.gz || $?force == 1 ) then
 		set cmd = ( epi_unwarp -m $mag -p $phase -e ${dout} -dwell $dwell -te $te -delta $delta )
-		set cmd = ( $cmd -epibet $bthresh -dtimc -o $udir -r ${root} -debug )
+		set cmd = ( $cmd -epibet $bthresh -dtimc -o $udir -r ${root} -dil -debug )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 
@@ -190,9 +190,9 @@ if ( $?nodist == 0 ) then
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 	
-	#Dilate magnitude brain mask
+	#Copy over magnitude brain mask
 	if ( ! -e ${dout}_b0_brain_mask.nii.gz || $?force == 1 ) then
-		set cmd = ( $FSLDIR/bin/fslmaths ${uout}_mag_brain_mask_to_${root}_epi_0_brain -dilM -ero )
+		set cmd = ( $FSLDIR/bin/imcp ${uout}_mag_brain_mask_to_${root}_epi_0_brain )
 		set cmd = ( $cmd ${dout}_b0_brain_mask )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
@@ -397,22 +397,22 @@ if ( ! -e ${qout}_dti_disp.png || ! -e ${qout}_dti_rot.png || ! -e ${qout}_dti_t
 	echo "absolute" > ${qout}_dti_disp_labels.txt; echo "relative" >> ${qout}_dti_disp_labels.txt
 	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_disp.txt -l ${qout}_dti_disp_labels.txt )
 	set cmd = ( $cmd -o ${qout}_dti_disp.png )
-	echo $cmd "'-t Estimated Eddy Current Mean Displacments (mm)'"
-	$cmd "'-t Estimated Eddy Current Mean Displacments (mm)'" | tee -a $log
-	
+	echo $cmd '--title=Estimated Eddy Current Mean Displacments (mm)'
+	$cmd '--title=Estimated Eddy Current Mean Displacments (mm)' | tee -a $log
+
 	#Create rotation graph
 	echo "x" > ${qout}_dti_rot_labels.txt; echo "y" >>${qout}_dti_rot_labels.txt
 	echo "z" >> ${qout}_dti_rot_labels.txt
 	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_rot.txt -l ${qout}_dti_rot_labels.txt )
 	set cmd = ( $cmd -o ${qout}_dti_rot.png )
-	echo $cmd "'-t Estimated Eddy Current Rotations (radians)'"
-	$cmd "'-t Estimated Eddy Current Rotations (radians)'" | tee -a $log
+	echo $cmd '--title=Estimated Eddy Current Rotations (radians)'
+	$cmd '--title=Estimated Eddy Current Rotations (radians)' | tee -a $log
 	
 	#Create translations graph
 	set cmd = ( $FSLDIR/bin/fsl_tsplot -i ${qout}_dti_trans.txt -l ${qout}_dti_rot_labels.txt )
 	set cmd = ( $cmd -o ${qout}_dti_trans.png )
-	echo $cmd "'-t Estimated Eddy Current Translations (mm)'"
-	$cmd "'-t Estimated Eddy Current Translations (mm)'" | tee -a $log
+	echo $cmd '--title=Estimated Eddy Current Translations (mm)'
+	$cmd '--title=Estimated Eddy Current Translations (mm)' | tee -a $log
 	
 	#Create average RMS 
 	cut -f1 -d" " ${qout}_dti_disp.txt | awk '{sum+=$0} END {print sum/NR}' > ${qout}_dti_disp_abs_avg.txt
@@ -425,11 +425,13 @@ endif
 
 
 #Setup slicer and png_append options
-set sliceropts = ( -s 2 -x 0.5 sla.png -x 0.45 slb.png -x 0.55 slc.png -x 0.65 sld.png -y 0.35 \
-					sle.png -y 0.45 slf.png -y 0.55 slg.png -y 0.65 slh.png -z 0.35 sli.png \
-					-z 0.45 slj.png -z 0.55 slk.png -z 0.65 sll.png )
-set appendopts = ( sla.png + slb.png + slc.png + sld.png + sle.png + slf.png + slg.png + slh.png \
-					+ sli.png + slj.png + slk.png + sll.png )
+set sliceropts = ( -s 2 -x 0.5 ${qout}_sla.png -x 0.45 ${qout}_slb.png -x 0.55 ${qout}_slc.png \
+				   -x 0.65 ${qout}_sld.png -y 0.35 ${qout}_sle.png -y 0.45 ${qout}_slf.png \
+				   -y 0.55 ${qout}_slg.png -y 0.65 ${qout}_slh.png -z 0.35 ${qout}_sli.png \
+				   -z 0.45 ${qout}_slj.png -z 0.55 ${qout}_slk.png -z 0.65 ${qout}_sll.png )
+set appendopts = ( ${qout}_sla.png + ${qout}_slb.png + ${qout}_slc.png + ${qout}_sld.png \
+				   + ${qout}_sle.png + ${qout}_slf.png + ${qout}_slg.png + ${qout}_slh.png \
+				   + ${qout}_sli.png + ${qout}_slj.png + ${qout}_slk.png + ${qout}_sll.png )
 
 #Use FSL to get brain mask QA image
 if ( ! -e ${qout}_dti_brain_mask_qa.png || $?force == 1 ) then

@@ -530,11 +530,13 @@ if ( ! -e ${qout}_bold_rot.png || ! -e ${qout}_bold_trans.png || ! -e ${qout}_bo
 endif
 
 #Setup slicer and png_append options
-set sliceropts = ( -s 2 -x 0.5 sla.png -x 0.45 slb.png -x 0.55 slc.png -x 0.65 sld.png -y 0.35 \
-					sle.png -y 0.45 slf.png -y 0.55 slg.png -y 0.65 slh.png -z 0.35 sli.png \
-					-z 0.45 slj.png -z 0.55 slk.png -z 0.65 sll.png )
-set appendopts = ( sla.png + slb.png + slc.png + sld.png + sle.png + slf.png + slg.png + slh.png \
-					+ sli.png + slj.png + slk.png + sll.png )
+set sliceropts = ( -s 2 -x 0.5 ${qout}_sla.png -x 0.45 ${qout}_slb.png -x 0.55 ${qout}_slc.png \
+				   -x 0.65 ${qout}_sld.png -y 0.35 ${qout}_sle.png -y 0.45 ${qout}_slf.png \
+				   -y 0.55 ${qout}_slg.png -y 0.65 ${qout}_slh.png -z 0.35 ${qout}_sli.png \
+				   -z 0.45 ${qout}_slj.png -z 0.55 ${qout}_slk.png -z 0.65 ${qout}_sll.png )
+set appendopts = ( ${qout}_sla.png + ${qout}_slb.png + ${qout}_slc.png + ${qout}_sld.png \
+				   + ${qout}_sle.png + ${qout}_slf.png + ${qout}_slg.png + ${qout}_slh.png \
+				   + ${qout}_sli.png + ${qout}_slj.png + ${qout}_slk.png + ${qout}_sll.png )
 
 #Use FSL to get brain mask QA image
 if ( ! -e ${qout}_bold_brain_mask_qa.png || $?force == 1 ) then
