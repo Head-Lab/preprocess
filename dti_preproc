@@ -332,11 +332,19 @@ if ( ! -e ${aout}_free_warped_to_MNI152.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
+#Use FSL to get a warp from DTI to MNI 152 Space
+if ( ! -e ${aout}_dti_to_MNI152_coef.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/convertwarp --premat=${aout}_dti_to_free.mat )
+	set cmd = ( $cmd --warp1=${aout}_free_to_MNI152_coef --out=${aout}_dti_to_MNI152_coef )
+	set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
 #Use FSL to apply nonlinear registration to DTI data
 if ( ! -e ${aout}_dti_warped_to_MNI152.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/applywarp --in=${dout}_b0_brain --out=${aout}_dti_warped_to_MNI152 )
 	set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
-	set cmd = ( $cmd --premat=${aout}_dti_to_free.mat --warp=${aout}_free_to_MNI152_coef )
+	set cmd = ( $cmd --warp=${aout}_dti_to_MNI152_coef )
 	set cmd = ( $cmd --mask=${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
@@ -379,17 +387,17 @@ if ( ! -e ${qout}_dti_disp.png || ! -e ${qout}_dti_rot.png || ! -e ${qout}_dti_t
 	foreach line ( $lines )
 		set row1 = `echo $line + 1 | bc`
 		set row2 = `echo $line + 5 | bc`
-		sed -n "${row1},${row2}p" ${dout}_eddy.ecclog > qa_curr.mat
+		sed -n "${row1},${row2}p" ${dout}_eddy.ecclog > ${qout}_qa_curr.mat
 		if ( $line == 3 ) then
-			cp qa_curr.mat qa_prev.mat; cp qa_curr.mat qa_first.mat
+			cp ${qout}_qa_curr.mat ${qout}_qa_prev.mat; cp ${qout}_qa_curr.mat ${qout}_qa_first.mat
 		endif
-		set absdiff = `$FSLDIR/bin/rmsdiff qa_curr.mat qa_first.mat ${dout}`
-		set reldiff = `$FSLDIR/bin/rmsdiff qa_curr.mat qa_prev.mat ${dout}`
-		cp qa_curr.mat qa_prev.mat
+		set absdiff = `$FSLDIR/bin/rmsdiff ${qout}_qa_curr.mat ${qout}_qa_first.mat ${dout}`
+		set reldiff = `$FSLDIR/bin/rmsdiff ${qout}_qa_curr.mat ${qout}_qa_prev.mat ${dout}`
+		cp ${qout}_qa_curr.mat ${qout}_qa_prev.mat
 		echo $absdiff $reldiff >> ${qout}_dti_disp.txt
-		$FSLDIR/bin/avscale --allparams qa_curr.mat ${dout} | grep 'Rotation Angles' | \
+		$FSLDIR/bin/avscale --allparams ${qout}_qa_curr.mat ${dout} | grep 'Rotation Angles' | \
 							sed 's/.* = //' >> ${qout}_dti_rot.txt
-		$FSLDIR/bin/avscale --allparams qa_curr.mat ${dout} | grep 'Translations' | \
+		$FSLDIR/bin/avscale --allparams ${qout}_qa_curr.mat ${dout} | grep 'Translations' | \
 							sed 's/.* = //' >> ${qout}_dti_trans.txt
 	end
 	
@@ -419,8 +427,8 @@ if ( ! -e ${qout}_dti_disp.png || ! -e ${qout}_dti_rot.png || ! -e ${qout}_dti_t
 	cut -f2 -d" " ${qout}_dti_disp.txt | awk '{sum+=$0} END {print sum/NR}' > ${qout}_dti_disp_rel_avg.txt
 	
 	#Delete leftovers
-	set cmd = ( rm ${qout}_dti_disp_labels.txt ${qout}_dti_rot_labels.txt qa_prev.mat qa_first.mat )
-	set cmd = ( $cmd qa_curr.mat ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( rm ${qout}_dti_disp_labels.txt ${qout}_dti_rot_labels.txt ${qout}_qa_prev.mat ${qout}_qa_first.mat )
+	set cmd = ( $cmd ${qout}_qa_curr.mat ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
 
