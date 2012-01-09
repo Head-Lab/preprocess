@@ -84,7 +84,7 @@ while ( $#argv > 0 )
 				echo "Cannot find config file at: $argv[1]"
 				exit 1
 			endif
-			set nonlin = 1; set nodist = 1; shift; breaksw;
+			set nonlin = $argv[1]; set nodist = 1; shift; breaksw;
 		case -bthresh:
 			set bthresh = $argv[1]; shift; breaksw;
 		case -root:
