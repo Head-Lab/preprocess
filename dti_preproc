@@ -32,7 +32,7 @@ if ( $#argv == 0 ) then
 	echo ""
 	echo "Optional Arguments:"
 	echo "	-nodist			No distortion correction. No longer need to specify -mag, -phase, -te, -dwell, and -delta."
-	echo "	-nonlin <config> Turn on FNIRT between FA and T1, using the specified configuration file. Implies -nodist."
+	echo "	-nonlin <config> 	Turn on FNIRT between FA and T1, using the specified configuration file. Implies -nodist."
 	echo "	-bthresh <thresh>	Threshold for BET masking. Default is 0.1."
 	echo "	-root <root>		Root for outputed files. Default is FreeSufer Subject ID."
 	echo '	-subjdir <dir>		FreeSurfer subjects directory. Default is current.'
@@ -84,7 +84,7 @@ while ( $#argv > 0 )
 				echo "Cannot find config file at: $argv[1]"
 				exit 1
 			endif
-			set nonlin = 1; set nodist = 1; breaksw;
+			set nonlin = 1; set nodist = 1; shift; breaksw;
 		case -bthresh:
 			set bthresh = $argv[1]; shift; breaksw;
 		case -root:
