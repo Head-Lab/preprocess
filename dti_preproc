@@ -32,6 +32,7 @@ if ( $#argv == 0 ) then
 	echo ""
 	echo "Optional Arguments:"
 	echo "	-nodist			No distortion correction. No longer need to specify -mag, -phase, -te, -dwell, and -delta."
+	echo "	-nonlin <config> Turn on FNIRT between FA and T1, using the specified configuration file. Implies -nodist."
 	echo "	-bthresh <thresh>	Threshold for BET masking. Default is 0.1."
 	echo "	-root <root>		Root for outputed files. Default is FreeSufer Subject ID."
 	echo '	-subjdir <dir>		FreeSurfer subjects directory. Default is current.'
@@ -78,6 +79,12 @@ while ( $#argv > 0 )
 			set delta = $argv[1]; shift; breaksw;
 		case -nodist:
 			set nodist = 1; breaksw;
+		case -nonlin:
+			if ( ! -e $argv[1] ) then
+				echo "Cannot find config file at: $argv[1]"
+				exit 1
+			endif
+			set nonlin = 1; set nodist = 1; breaksw;
 		case -bthresh:
 			set bthresh = $argv[1]; shift; breaksw;
 		case -root:
@@ -293,7 +300,7 @@ if ( ! -e ${aout}_dti_to_free_std.mat || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-#Use FSL to apply transfomration to Freesurfer space
+#Use FSL to apply transformation to Freesurfer space
 if ( ! -e ${aout}_dti_to_free_std.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/flirt -in ${dout}_b0_brain -ref ${aout}_T1_std  )
 	set cmd = ( $cmd -applyxfm -init ${aout}_dti_to_free_std.mat -out ${aout}_dti_to_free_std )
@@ -307,6 +314,49 @@ if ( ! -e ${aout}_free_to_dti.mat || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
+if ( $?nonlin == 1 ) then
+	#Copy over FNIRT configuration file
+	if ( ! -e ${aout}_FA_to_T1.cnf || $?force == 1 ) then
+		set cmd = ( cp $nonlin ${aout}_FA_to_T1.cnf ); echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to erode FA to remove bright edges
+	if ( ! -e ${dout}_FA_ero.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fslmaths ${dout}_FA -ero -ero ${dout}_FA_ero )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+
+	#Use FSL to do a nonlinear registration between FA and T1
+	if ( ! -e ${aout}_dti_to_free_coef.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/fnirt --in=${dout}_FA_ero --ref=${aout}_T1.nii.gz )
+		set cmd = ( $cmd --config=${aout}_FA_to_T1.cnf --aff=${aout}_dti_to_free.mat )
+		set cmd = ( $cmd --cout=${aout}_dti_to_free_coef --verbose )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to get a warp between dti and standard orientation free
+	if ( ! -e ${aout}_dti_to_free_std_coef.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/convertwarp --ref=${aout}_T1_std.nii.gz )
+		set cmd = ( $cmd --warp1=${aout}_dti_to_free_coef --postmat=${aout}_free_to_std.mat )
+		set cmd  = ( $cmd --out=${aout}_dti_to_free_std_coef ) 
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to apply dti to standard orientation warp
+	if ( ! -e ${aout}_dti_warped_to_free_std.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/applywarp --in=${dout}_b0_brain --ref=${aout}_T1_std ) 
+		set cmd = ( $cmd --warp=${aout}_dti_to_free_std_coef --out=${aout}_dti_warped_to_free_std )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to inverp FA->T1 warp
+	if ( ! -e ${aout}_free_to_dti_coef.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/invwarp --warp=${aout}_dti_to_free_coef )
+		set cmd = ( $cmd --ref=${dout}_FA --out=${aout}_free_to_dti_coef --force )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+endif
+
 #Use FSL to do a linear registertion between T1 and MNI152
 if ( ! -e ${aout}_free_to_MNI152.mat || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/flirt -in ${aout}_brainmask -omat ${aout}_free_to_MNI152.mat )
@@ -318,7 +368,7 @@ endif
 #Use FSL to do a nonlinear registration between T1 and MNI152
 if ( ! -e ${aout}_free_to_MNI152_coef.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/fnirt --in=${aout}_T1 --aff=${aout}_free_to_MNI152.mat )
-	set cmd = ( $cmd --config=T1_2_MNI152_2mm.cnf --jacrange=0_1,10 )
+	set cmd = ( $cmd --config=T1_2_MNI152_2mm.cnf --jacrange=0_1,10 --verbose )
 	set cmd = ( $cmd --cout=${aout}_free_to_MNI152_coef --jout=${aout}_free_to_MNI152_jac )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
@@ -330,6 +380,25 @@ if ( ! -e ${aout}_free_warped_to_MNI152.nii.gz || $?force == 1 ) then
 	set cmd = ( $cmd --warp=${aout}_free_to_MNI152_coef )
 	set cmd = ( $cmd --mask=${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+if ( $?nonlin == 1 ) then
+	#Use FSL to get a warp from warped dti to MNI152 space
+	if ( ! -e ${aout}_warped_dti_to_MNI152_coef.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/convertwarp --warp2=${aout}_free_to_MNI152_coef )
+		set cmd = ( $cmd --warp1=${aout}_dti_to_free_coef --out=${aout}_warped_dti_to_MNI152_coef )
+		set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	
+	#Use FSL to get apply both non-linear registrations to DTI data
+	if ( ! -e ${aout}_warped_dti_warped_to_MNI152.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/applywarp --out=${aout}_warped_dti_warped_to_MNI152 )
+		set cmd = ( $cmd --ref=${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+		set cmd = ( $cmd --warp=${aout}_warped_dti_to_MNI152_coef --in=${dout}_b0_brain )
+		set cmd = ( $cmd --mask=${FSLDIR}/data/standard/MNI152_T1_2mm_brain_mask )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
 endif
 
 #Use FSL to get a warp from DTI to MNI 152 Space
@@ -363,6 +432,13 @@ if ( ! -e ${aout}_MNI152_to_free_coef.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
+#Use FSL to get a MNI->152 to warped DTI warp
+if ( $?nonlin == 1 && ( ! -e ${aout}_MNI152_to_warped_dti_coef.nii.gz || $?force == 1 ) ) then
+	set cmd = ( $FSLDIR/bin/convertwarp --warp1=${aout}_MNI152_to_free_coef --ref=${dout}_b0_brain )
+	set cmd = ( $cmd --warp2=${aout}_free_to_dti_coef --out=${aout}_MNI152_to_warped_dti_coef )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+		
 #Use FSL to get a warp from MNI152 space to DTI space
 if ( ! -e ${aout}_MNI152_to_dti_coef.nii.gz || $?force == 1 ) then
 	set cmd = ( $FSLDIR/bin/convertwarp --warp1=${aout}_MNI152_to_free_coef --ref=${dout}_b0_brain )
@@ -450,7 +526,7 @@ if ( ! -e ${qout}_dti_brain_mask_qa.png || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Cleanup
-	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
 endif
 
 #Use FSL to get tensor fit SSE
@@ -462,7 +538,7 @@ if ( ! -e ${qout}_dti_sse_qa.png || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Cleanup
-	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
 endif
 
 #Use FSL to get distortion correction QA
@@ -508,7 +584,7 @@ if ( ! -e ${qout}_dti_to_free_qa.png || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log	
 	
 	#Cleanup
-	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
 endif
 
 #Use FSL to get free to MNI 152 space QA
@@ -533,7 +609,7 @@ if ( ! -e ${qout}_free_to_MNI152_qa.png || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log	
 	
 	#Cleanup
-	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
 endif
 
 #Use FSL to get dti to MNI 152 space QA
@@ -558,7 +634,56 @@ if ( ! -e ${qout}_dti_to_MNI152_qa.png || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Cleanup
-	echo rm sl?.png |& tee -a $log; rm sl?.png |& tee -a $log
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
+endif
+
+if ( $?nonlin == 1 ) then
+	#Use FSL to get warped DTI->T1 registration qa images
+	if ( ! -e ${qout}_dti_warped_to_free_qa.png || $?force == 1 ) then
+		#Get diffusion outlines
+		set cmd = ( $FSLDIR/bin/slicer ${aout}_brainmask_std ${aout}_dti_warped_to_free_std $sliceropts )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_dti_warped_to_free_qa1.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		
+		#Get T1 outlines
+		set cmd = ( $FSLDIR/bin/slicer ${aout}_dti_warped_to_free_std ${aout}_brainmask_std $sliceropts )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_dti_warped_to_free_qa2.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+		#Combine QA Images
+		set cmd = ( $FSLDIR/bin/pngappend ${qout}_dti_warped_to_free_qa1.png )
+		set cmd = ( $cmd - ${qout}_dti_warped_to_free_qa2.png ${qout}_dti_warped_to_free_qa.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log	
+	
+		#Cleanup
+		echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
+	endif
+	
+	if ( ! -e ${qout}_warped_dti_to_MNI152_qa.png || $?force == 1 ) then
+		#Use FSL to get warped DTI to MNI152 QA (MNI Outlines)
+		set cmd = ( $FSLDIR/bin/slicer ${aout}_warped_dti_warped_to_MNI152 )
+		set cmd = ( $cmd ${FSLDIR}/data/standard/MNI152_T1_2mm_brain $sliceropts )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_warped_dti_to_MNI152_qa1.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+		#Use FSL to get warped DTI to MNI 152 QA (free standard outlines)
+		set cmd = ( $FSLDIR/bin/slicer ${FSLDIR}/data/standard/MNI152_T1_2mm_brain )
+		set cmd = ( $cmd ${aout}_warped_dti_warped_to_MNI152 $sliceropts )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_warped_dti_to_MNI152_qa2.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+		#Combine QA Images
+		set cmd = ( $FSLDIR/bin/pngappend ${qout}_warped_dti_to_MNI152_qa1.png )
+		set cmd = ( $cmd - ${qout}_warped_dti_to_MNI152_qa2.png ${qout}_warped_dti_to_MNI152_qa.png )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+		#Cleanup
+		echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
+	endif
 endif
 
 ################
@@ -613,10 +738,18 @@ if ( ! -e ${qout}_dti_qa_index.html || $?force == 1 ) then
 	set bbcost = `awk '{print $1}' ${aout}_dti_to_free.dat.mincost`
 	echo "DTI to FreeSurfer T1 - bbregister final cost: $bbcost " >> ${qout}_dti_qa_reg.html
 	echo "<p><IMG BORDER=0 SRC=${root}_dti_to_free_qa.png WIDTH=2000>" >> ${qout}_dti_qa_reg.html
+	if ( $?nonlin == 1 ) then
+		echo "<p>Nonlinear Registration between DTI and T1" >> ${qout}_dti_qa_reg.html
+		echo "<p><IMG BORDER=0 SRC=${root}_dti_warped_to_free_qa.png WIDTH=2000><p>" >> ${qout}_dti_qa_reg.html
+	endif
 	echo "<p>Nonlinear Registration of Freesurfer T1 to MNI152 T1 2MM" >> ${qout}_dti_qa_reg.html
 	echo "<p><IMG BORDER=0 SRC=${root}_free_to_MNI152_qa.png WIDTH=2000>" >> ${qout}_dti_qa_reg.html
 	echo "<p>Nonlinear Registration of DTI to MNI152 T1 2MM" >> ${qout}_dti_qa_reg.html
 	echo "<p><IMG BORDER=0 SRC=${root}_dti_to_MNI152_qa.png WIDTH=2000>" >> ${qout}_dti_qa_reg.html
+	if ( $?nonlin == 1 ) then
+		echo "<p>Nonlinear Registration between warped DTI and MNI152" >> ${qout}_dti_qa_reg.html
+		echo "<p><IMG BORDER=0 SRC=${root}_warped_dti_to_MNI152_qa.png WIDTH=2000><p>" >> ${qout}_dti_qa_reg.html
+	endif
 endif
 
 echo "" |& tee -a $log
