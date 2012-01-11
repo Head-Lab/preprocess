@@ -1,0 +1,217 @@
+#!/bin/tcsh -f
+# Tyler Blazey, Winter 2011/2012
+
+#Check for dependencies
+if ( ! -e $FSLDIR ) then
+	echo "Set FSLDIR before running script"
+	exit 1
+endif
+if ( ! -e $FREESURFER_HOME ) then
+	echo "Set FREESURFER_HOME before running script"
+	exit 1
+endif
+
+#Usage
+set program = $0:t
+if ( $#argv == 0 ) then
+	echo ""
+	echo "${program}: A basic mri_segstats wrapper for dti_preproc"
+	echo ""
+	echo "Usage:"
+	echo ""
+	echo "Required Arguments:"
+	echo "	-dir: <dir> 	dti_preproc results directory."
+	echo " 	-reg: <reg> 	Registration type. Takes lin or nonlin."
+	echo "	-mode: <mode>	Stats to report. Takes either all (every FreeSurfer ROI),wm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
+	echo "	-tensor: <tensor>	Image to get stats on. Takes either all or FA,RD,MD,L1, or MO."
+	echo "	-append: <append>	Append text to stats file name."
+	echo ""
+	echo "Optional Arguments:"
+	echo "	-id: <FreeSurfer ROI>	Specify FreeSurfer ROI. For multiple ROIS use multiple -id flags."
+	echo '	-subjdir <dir>		FreeSurfer subjects directory. By default it will use directory used by dti_preproc.'
+	echo " 	-subj: <subj> 		Freesurfer subject ID. By default it will use directory used by dti_preproc."
+	echo "	-erode <erode>	Erode FreeSurfer ROI mask <erode> number of times. When used with -mode wm, will erode WM mask"
+	echo "	-force			Run command even if output exists."	
+	echo "	-debug			Turn on set echo."
+	echo ""
+	exit
+endif
+
+#Set Defaults
+set id_list = ()
+
+#Parse arguments
+set args = ( $argv )
+while ( $#argv > 0 )
+	set flag = $argv[1]; shift;
+	switch ( $flag )
+		case -dir:
+			if ( ! -d $argv[1]/dti ) then
+				echo "Cannot find dti_preproc results directory at $argv[1]"
+				exit 1
+			endif
+			set outdir = $argv[1]; shift; breaksw;
+		case -reg:
+			if ( $argv[1] != "nonlin" && $argv[1] != "lin" ) then
+				echo "-reg option $argv[1] not known. See usage"
+			exit 1
+			endif
+			set reg = $argv[1]; shift; breaksw;
+		case -mode:
+			if ( $argv[1] != "all" && $argv[1] != "roi"  && $argv[1] != "wm" ) then
+				echo "-mode option $argv[1] not known. See usage"
+			exit 1
+			endif
+			set mode = $argv[1]; shift; breaksw;
+		case -tensor:
+			#Check to make sure -reg is set correctly
+			set toptions = ( "all" "L1" "FA" "MD" "MO" "RD" ); echo $toptions | grep -qw $argv[1];
+			if ( $? == 1 ) then
+				echo "-tensor option $argv[1] not known. See usage"
+				exit 1
+			endif
+			if ( $argv[1] == "all" ) then
+				set tensor_list  = ( FA L1 MD MO RD )
+			else
+				set tensor_list = ( $argv[1] )
+			endif
+			shift; breaksw;
+		case -append:
+			set append = $argv[1]; shift; breaksw;
+		case -id:
+			set id_list = ( $id_list $argv[1] ); shift; breaksw;
+		case -erode:
+			set erode = $argv[1]; shift; breaksw;
+		case -subjdir:
+			if ( ! -d $argv[1] ) then
+				echo "Cannot find directory $argv[1]."
+				exit 1
+			else
+				setenv SUBJECTS_DIR $argv[1]; shift; breaksw;
+			endif
+		case -subj:
+			set subj = $argv[1]; shift; breaksw;
+		case -force:
+			set force = 1; breaksw;
+		case -debug:
+			set debug = 1; breaksw;
+		default:
+			"Option $flag not recognized. See usage"
+			exit 1
+	endsw
+end
+if ( $?debug == 1 ) set echo
+
+#Check to make sure all required options have been set
+if ( $?outdir == 0 || $?reg == 0 || $?mode == 0 ) then
+	echo "Missing required arguments. See usage."
+	exit 1
+endif
+
+#Check to see that if mode is roi, an id as been set
+if ( $?mode == 1 && $#id_list == 0 ) then
+	echo "Mode is roi, but not id's have been set."
+	exit 1
+endif
+
+#Setup directory stuff
+set root = `awk '/Outroot/{print $2}' $dir/dti_preproc.log`
+if ( $?subj == 0 ) set subj = `awk '/FreeSurfer Subject ID:/{print $2}' $dir/dti_preproc.log`
+if ( $?subjdir == 0 ) set subjdir  = `awk '/SUBJECTS_DIR:/{print $2}' $dir/dti_preproc.log`
+set sdir = $outdir/stats; if ( ! -d $sdir ) mkdir $sdir; set sout = $sdir/${root}_dti
+set ddir = $outdir/dti; set dout = $ddir/${root}_dti;
+
+#Check to see subject is within SUBJECTS_DIR
+if ( ! -e $SUBJECTS_DIR/$subj ) then
+	echo "Cannot find subject: $subj within SUBJECTS_DIR: $SUBJECTS_DIR"
+	exit 1
+endif
+
+#Check to see if appropriate transform has been done
+if ( $reg == "lin" ) then
+	if ( ! -e ${aout}/${root}_dti_to_free.mat ) then
+		echo "Cannot find linear transformation at $outdir/atlas/${root}_dti_to_free.mat"
+		exit 1
+	endif
+	set xfm = "--premat=${aout}/${root}_dti_to_free.mat"; set reg_end = "_to_free";
+else
+	if ( ! -e ${aout}/${root}_dti_to_free_coef.nii.gz ) then
+		echo "Cannot find nonlinear transformation at $outdir/atlas/${root}_dti_to_free_coef.nii.gz"
+		exit 1
+	endif
+	set xfm = "--warp=${aout}/${root}_dti_to_free_coef.nii.gz"; set reg_end = "_warped_to_";
+endif
+
+#Create log file
+set log = $outdir/${program}.log
+if ( ! -e $log ) then
+	touch $log
+	set runnum = 1
+else
+	set oldruns = `grep -c "Run Number:" $log`
+	set runnum = `echo "$oldruns + 1" | bc`
+endif
+echo ""|& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+echo "Program: ${program}" |& tee -a $log
+echo "Run Number: $runnum" |& tee -a $log
+echo "Outdir: $outdir" |& tee -a $log
+echo "Outroot: $root" |& tee -a $log
+echo "Append: $append" |& tee -a $log
+echo "Start Time: `date '+%Y-%m-%d-%I-%M-%S'`" |& tee -a $log
+echo "User: `whoami`" |& tee -a $log
+echo "System Info: `uname -a`" |& tee -a $log
+echo "Working Directory `pwd`" |& tee -a $log
+echo "Input arguments: $args" |& tee -a $log
+echo "FREESURFER_HOME: $FREESURFER_HOME" |& tee -a $log
+echo "Freesurfer Version: `more $FREESURFER_HOME/build-stamp.txt`" |& tee -a $log
+echo "SUBJECTS_DIR: $SUBJECTS_DIR" |& tee -a $log
+echo "FreeSurfer Subject ID: $subj" |& tee -a $log
+echo "FSLDIR: $FSLDIR" |& tee -a $log
+echo "FSL Version: `more $FSLDIR/etc/fslversion`" |& tee -a $log
+echo "" | & tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+
+#Use FSL to get a binary T1 brainmask
+if ( ! -e ${aout}_free_mask.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslmaths ${aout}_brainmask -bin ${aout}_free_mask )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
+if ( $mode == "roi" ) then
+	$match_list 
+	
+else if ( $mode == "wm" ) then
+	#Use FreeSurfer to get white matter mask
+	if ( ! -e ${sout}_wm_mask_${append}.nii.gz || $?force == 1 ) then
+		@ k = 0; set match_list = ()
+		while ( $k <= 35 )
+			@ left = 3000 + $k; @ right = 4000 + $k 
+			set match_list = ( $match_list $left $right )
+		set cmd = ( $FREESURFER_HOME/bin/mri_binarize  --i $subjdir/$subj/mri/wmparc.mgz )
+		set cmd = ( $cmd --o 
+		
+#Use FreeSurfer to erode if necessary
+if ( $?erode == ! && ( ! -e ${sout}_mask_eroded_${append}.nii.gz || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $mask --erode $erode --match 1 ) 
+	set cmd = ( $cmd --o ${sout}_mask_eroded_${append}.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		endif
+		set mask = ${sout}_mask__eroded_${append}.nii.gz
+		
+
+#Use FSL to transform specified tensor images
+foreach tensor ( $tensor_list )
+	if ( ! -e ${dout}_${tensor}_${reg_end}.nii.gz || $?force == 1 ) then
+		set cmd = ( $FSLDIR/bin/applywarp --in=${dout}_${tensor} --ref=${aout}_T1 )
+		set cmd = ( $cmd --mask=${aout}_brainmask --out=${dout}_${tensor}_${reg_end} $xfm )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+		
+
+
+
+
