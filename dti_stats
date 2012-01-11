@@ -22,7 +22,7 @@ if ( $#argv == 0 ) then
 	echo "Required Arguments:"
 	echo "	-dir: <dir> 	dti_preproc results directory."
 	echo " 	-reg: <reg> 	Registration type. Takes lin or nonlin."
-	echo "	-mode: <mode>	Stats to report. Takes either all (every FreeSurfer ROI),wm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
+	echo "	-mode: <mode>	Stats to report. Takes either all (every FreeSurfer ROI), cwm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
 	echo "	-tensor: <tensor>	Image to get stats on. Takes either all or FA,RD,MD,L1, or MO."
 	echo "	-append: <append>	Append text to stats file name."
 	echo ""
@@ -182,36 +182,71 @@ if ( ! -e ${aout}_free_mask.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
-if ( $mode == "roi" ) then
-	$match_list 
-	
-else if ( $mode == "wm" ) then
-	#Use FreeSurfer to get white matter mask
-	if ( ! -e ${sout}_wm_mask_${append}.nii.gz || $?force == 1 ) then
-		@ k = 0; set match_list = ()
-		while ( $k <= 35 )
-			@ left = 3000 + $k; @ right = 4000 + $k 
-			set match_list = ( $match_list $left $right )
-		set cmd = ( $FREESURFER_HOME/bin/mri_binarize  --i $subjdir/$subj/mri/wmparc.mgz )
-		set cmd = ( $cmd --o 
-		
-#Use FreeSurfer to erode if necessary
-if ( $?erode == ! && ( ! -e ${sout}_mask_eroded_${append}.nii.gz || $?force == 1 ) then
-	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $mask --erode $erode --match 1 ) 
-	set cmd = ( $cmd --o ${sout}_mask_eroded_${append}.nii.gz )
+#Use FSL to get a defined DTI mask
+if ( ! -e ${dout}_defined_mask.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_dti_eddy -Tmean -bin -mas ${dout}_dti_brain_mask )
+	set cmd = ( $cmd ${dout}_defined_mask ) 
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		endif
-		set mask = ${sout}_mask__eroded_${append}.nii.gz
-		
+endif	
 
-#Use FSL to transform specified tensor images
+#Get appropriate mask
+if ( $mode == "roi" && ( ! -e ${sout}_roi_mask_${append}.nii.gz || $?force == 1 )) then
+	#Use FreeSurfer to get roi binary mask
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
+	set cmd = ( $cmd --match $id_list --o ${sout}_roi_mask_${append}.nii.gz )
+	set cmd = ( $cmd --mask ${dout}_defined_mask.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set mask = ${sout}_roi_mask_${append}.nii.gz
+else if ( $mode == "cwm" && ( ! -e ${sout}_cwm_mask.nii.gz || $?force == 1 )) then
+	#Setup ROI list
+	@ k = 0; set id_list = ()
+	while ( $k <= 35 )
+		@ left = 3000 + $k; @ right = 4000 + $k 
+		set id_list = ( $match_list $left $right )
+	end
+	#Use FreeSurfer to get cortical wm mask
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
+	set cmd = ( $cmd --match $id_list --o ${sout}_cwm_mask.nii.gz )
+	set cmd = ( $cmd  --mask ${dout}_defined_mask.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set mask = ${sout}_roi_mask_${append}.nii.gz
+else
+	set mask = ${dout}_defined_mask.nii.gz 
+endif
+	
+#Use FreeSurfer to erode mask if necessary
+if ( $?erode == 1 && ( ! -e ${mask:r:r}_ero.nii.gz || $?force == 1 ) then
+	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $mask --erode $erode --match 1 ) 
+	set cmd = ( ${mask:r:r}_ero.nii.gz )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set mask = {mask:r:r}_ero.nii.gz
+endif
+
 foreach tensor ( $tensor_list )
+	#Use FSL to transform specified tensor images	
 	if ( ! -e ${dout}_${tensor}_${reg_end}.nii.gz || $?force == 1 ) then
 		set cmd = ( $FSLDIR/bin/applywarp --in=${dout}_${tensor} --ref=${aout}_T1 )
-		set cmd = ( $cmd --mask=${aout}_brainmask --out=${dout}_${tensor}_${reg_end} $xfm )
+		set cmd = ( $cmd --mask=${aout}_free_mask --out=${dout}_${tensor}_${reg_end} $xfm )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
-		
+	endif
+	
+	#Use FreeSurfer to get tensor statistics
+	if ( ! -e ${sout}_stats_${append}.txt || $?force == 1 ) then
+		set cmd = ( $FREESURFER_HOME/bin/mri_segstats --i ${dout}_${tensor}_${reg_end}.nii.gz )
+		set cmd = ( $cmd --ctab $FREESURFER_HOME/FreeSurferColorLUT.txt )
+		set cmd = ( $cmd --sum ${sout}_stats_${append}.txt --mask $mask )
+		set cmd = ( $cmd --seg ${SUBJECTS_DIR}/${subject}/mri/wmparc.mgz )
+		if ( $#id_list != 0 ) set cmd = ( $cmd --id $id_list )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+end
 
-
-
-
+echo "" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "" |& tee -a $log
+echo "${program} is DONE" |& tee -a $log
+echo "End Time: `date '+%Y-%m-%d-%I-%M-%S'`" |& tee -a $log
+echo "" |& tee -a $log
+echo "#######################################" |& tee -a $log
+echo "#######################################" |& tee -a $log
