@@ -256,6 +256,12 @@ if ( ! -e ${dout}_FA.nii.gz || $?force == 1 ) then
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif
 
+#Use FSL to calculate Radial Diff.
+if ( ! -e ${dout}_RD.nii.gz || $?force == 1 ) then
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_L2 -add ${dout}_L3 -div 2 ${dout}_RD )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+
 ########################
 ###Atlas Registration###
 ########################

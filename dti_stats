@@ -20,17 +20,17 @@ if ( $#argv == 0 ) then
 	echo "Usage:"
 	echo ""
 	echo "Required Arguments:"
-	echo "	-dir: <dir> 	dti_preproc results directory."
-	echo " 	-reg: <reg> 	Registration type. Takes lin or nonlin."
-	echo "	-mode: <mode>	Stats to report. Takes either all (every FreeSurfer ROI), cwm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
+	echo "	-dir: <dir> 		dti_preproc results directory."
+	echo " 	-reg: <reg> 		Registration type. Takes lin or nonlin."
+	echo "	-mode: <mode>		Stats to report. Takes either all (every FreeSurfer ROI), cwm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
 	echo "	-tensor: <tensor>	Image to get stats on. Takes either all or FA,RD,MD,L1, or MO."
 	echo "	-append: <append>	Append text to stats file name."
 	echo ""
 	echo "Optional Arguments:"
 	echo "	-id: <FreeSurfer ROI>	Specify FreeSurfer ROI. For multiple ROIS use multiple -id flags."
 	echo '	-subjdir <dir>		FreeSurfer subjects directory. By default it will use directory used by dti_preproc.'
-	echo " 	-subj: <subj> 		Freesurfer subject ID. By default it will use directory used by dti_preproc."
-	echo "	-erode <erode>	Erode FreeSurfer ROI mask <erode> number of times. When used with -mode wm, will erode WM mask"
+	echo " 	-subj: <subj> 		Freesurfer subject ID. By default it will use subject ID used by dti_preproc."
+	echo "	-erode <erode>		Erode FreeSurfer ROI mask <erode> number of times."
 	echo "	-force			Run command even if output exists."	
 	echo "	-debug			Turn on set echo."
 	echo ""
@@ -58,9 +58,9 @@ while ( $#argv > 0 )
 			endif
 			set reg = $argv[1]; shift; breaksw;
 		case -mode:
-			if ( $argv[1] != "all" && $argv[1] != "roi"  && $argv[1] != "wm" ) then
+			if ( $argv[1] != "all" && $argv[1] != "roi"  && $argv[1] != "cwm" ) then
 				echo "-mode option $argv[1] not known. See usage"
-			exit 1
+				exit 1
 			endif
 			set mode = $argv[1]; shift; breaksw;
 		case -tensor:
@@ -87,7 +87,7 @@ while ( $#argv > 0 )
 				echo "Cannot find directory $argv[1]."
 				exit 1
 			else
-				setenv SUBJECTS_DIR $argv[1]; shift; breaksw;
+				set subjdir = $argv[1]; shift; breaksw;
 			endif
 		case -subj:
 			set subj = $argv[1]; shift; breaksw;
@@ -109,17 +109,19 @@ if ( $?outdir == 0 || $?reg == 0 || $?mode == 0 ) then
 endif
 
 #Check to see that if mode is roi, an id as been set
-if ( $?mode == 1 && $#id_list == 0 ) then
+if ( $mode == "roi" && $#id_list == 0 ) then
 	echo "Mode is roi, but not id's have been set."
 	exit 1
 endif
 
 #Setup directory stuff
-set root = `awk '/Outroot/{print $2}' $dir/dti_preproc.log`
-if ( $?subj == 0 ) set subj = `awk '/FreeSurfer Subject ID:/{print $2}' $dir/dti_preproc.log`
-if ( $?subjdir == 0 ) set subjdir  = `awk '/SUBJECTS_DIR:/{print $2}' $dir/dti_preproc.log`
+set root = `awk '/Outroot/{print $2}' $outdir/dti_preproc.log | head -1`
+if ( $?subj == 0 ) set subj = `awk '/FreeSurfer Subject ID:/{print $4}' $outdir/dti_preproc.log | head -1`
+if ( $?subjdir == 0 ) set subjdir  = `awk '/SUBJECTS_DIR:/{print $2}' $outdir/dti_preproc.log | head -1`
+setenv SUBJECTS_DIR $subjdir
 set sdir = $outdir/stats; if ( ! -d $sdir ) mkdir $sdir; set sout = $sdir/${root}_dti
-set ddir = $outdir/dti; set dout = $ddir/${root}_dti;
+set ddir = $outdir/dti; set dout = $ddir/${root}_dti; set adir = $outdir/atlas
+set aout = $adir/${root}
 
 #Check to see subject is within SUBJECTS_DIR
 if ( ! -e $SUBJECTS_DIR/$subj ) then
@@ -129,17 +131,17 @@ endif
 
 #Check to see if appropriate transform has been done
 if ( $reg == "lin" ) then
-	if ( ! -e ${aout}/${root}_dti_to_free.mat ) then
+	if ( ! -e ${aout}_dti_to_free.mat ) then
 		echo "Cannot find linear transformation at $outdir/atlas/${root}_dti_to_free.mat"
 		exit 1
 	endif
-	set xfm = "--premat=${aout}/${root}_dti_to_free.mat"; set reg_end = "_to_free";
+	set xfm = "--premat=${aout}_dti_to_free.mat"; set reg_end = "to_free";
 else
-	if ( ! -e ${aout}/${root}_dti_to_free_coef.nii.gz ) then
+	if ( ! -e ${aout}_dti_to_free_coef.nii.gz ) then
 		echo "Cannot find nonlinear transformation at $outdir/atlas/${root}_dti_to_free_coef.nii.gz"
 		exit 1
 	endif
-	set xfm = "--warp=${aout}/${root}_dti_to_free_coef.nii.gz"; set reg_end = "_warped_to_";
+	set xfm = "--warp=${aout}_dti_to_free_coef.nii.gz"; set reg_end = "warped_to_free";
 endif
 
 #Create log file
@@ -184,38 +186,55 @@ endif
 
 #Use FSL to get a defined DTI mask
 if ( ! -e ${dout}_defined_mask.nii.gz || $?force == 1 ) then
-	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_dti_eddy -Tmean -bin -mas ${dout}_dti_brain_mask )
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_eddy -Tmin -bin -mas ${dout}_b0_brain_mask )
 	set cmd = ( $cmd ${dout}_defined_mask ) 
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 endif	
 
+#Get a defined DTI mask in T1 space
+if ( ! -e ${dout}_defined_mask_${reg_end}.nii.gz || $?force == 1 ) then
+	#Use FSL to transform mask to T1 space
+	set cmd = ( $FSLDIR/bin/applywarp --in=${dout}_defined_mask --ref=${aout}_T1 )
+	set cmd = ( $cmd --mask=${aout}_free_mask --out=${dout}_defined_mask_${reg_end} $xfm )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+	#Use FSL to rebinarize mask
+	set cmd = ( $FSLDIR/bin/fslmaths ${dout}_defined_mask_${reg_end} -thr 0.5 -bin )
+	set cmd = ( $cmd ${dout}_defined_mask_${reg_end} )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+endif
+set defined_mask = ${dout}_defined_mask_${reg_end}.nii.gz
+
 #Get appropriate mask
-if ( $mode == "roi" && ( ! -e ${sout}_roi_mask_${append}.nii.gz || $?force == 1 )) then
-	#Use FreeSurfer to get roi binary mask
-	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
-	set cmd = ( $cmd --match $id_list --o ${sout}_roi_mask_${append}.nii.gz )
-	set cmd = ( $cmd --mask ${dout}_defined_mask.nii.gz )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+if ( $mode == "roi" ) then
+	if ( ! -e ${sout}_roi_mask_${append}.nii.gz || $?force == 1 ) then
+		#Use FreeSurfer to get roi binary mask
+		set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
+		set cmd = ( $cmd --match $id_list --o ${sout}_roi_mask_${append}.nii.gz --mask $defined_mask )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
 	set mask = ${sout}_roi_mask_${append}.nii.gz
-else if ( $mode == "cwm" && ( ! -e ${sout}_cwm_mask.nii.gz || $?force == 1 )) then
-	#Setup ROI list
-	@ k = 0; set id_list = ()
-	while ( $k <= 35 )
-		@ left = 3000 + $k; @ right = 4000 + $k 
-		set id_list = ( $match_list $left $right )
-	end
-	#Use FreeSurfer to get cortical wm mask
-	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
-	set cmd = ( $cmd --match $id_list --o ${sout}_cwm_mask.nii.gz )
-	set cmd = ( $cmd  --mask ${dout}_defined_mask.nii.gz )
-	echo $cmd |& tee -a $log; $cmd |& tee -a $log
-	set mask = ${sout}_roi_mask_${append}.nii.gz
+else if ( $mode == "cwm" ) then
+	if ( ! -e ${sout}_cwm_mask.nii.gz || $?force == 1 ) then
+		#Setup ROI list
+		@ k = 0; set id_list = ()
+		while ( $k <= 35 )
+			@ left = 3000 + $k; @ right = 4000 + $k 
+			set id_list = ( $id_list $left $right )
+			@ k++
+		end
+		#Use FreeSurfer to get cortical wm mask
+		set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
+		set cmd = ( $cmd --match $id_list --o ${sout}_cwm_mask_${append}.nii.gz --mask $defined_mask )
+		echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	endif
+	set mask = ${sout}_cwm_mask_${append}.nii.gz
 else
-	set mask = ${dout}_defined_mask.nii.gz 
+	set mask = $defined_mask 
 endif
 	
 #Use FreeSurfer to erode mask if necessary
-if ( $?erode == 1 && ( ! -e ${mask:r:r}_ero.nii.gz || $?force == 1 ) then
+if ( $?erode == 1 && ( ! -e ${mask:r:r}_ero.nii.gz || $?force == 1 )) then
 	set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $mask --erode $erode --match 1 ) 
 	set cmd = ( ${mask:r:r}_ero.nii.gz )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
@@ -231,11 +250,11 @@ foreach tensor ( $tensor_list )
 	endif
 	
 	#Use FreeSurfer to get tensor statistics
-	if ( ! -e ${sout}_stats_${append}.txt || $?force == 1 ) then
+	if ( ! -e ${sout}_${tensor}_${reg_end}_${mode}_stats_${append}.txt || $?force == 1 ) then
 		set cmd = ( $FREESURFER_HOME/bin/mri_segstats --i ${dout}_${tensor}_${reg_end}.nii.gz )
-		set cmd = ( $cmd --ctab $FREESURFER_HOME/FreeSurferColorLUT.txt )
-		set cmd = ( $cmd --sum ${sout}_stats_${append}.txt --mask $mask )
-		set cmd = ( $cmd --seg ${SUBJECTS_DIR}/${subject}/mri/wmparc.mgz )
+		set cmd = ( $cmd --ctab $FREESURFER_HOME/FreeSurferColorLUT.txt --mask $mask )
+		set cmd = ( $cmd --sum ${sout}_${tensor}_${reg_end}_${mode}_stats_${append}.txt )
+		set cmd = ( $cmd --seg ${SUBJECTS_DIR}/${subj}/mri/wmparc.mgz )
 		if ( $#id_list != 0 ) set cmd = ( $cmd --id $id_list )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
