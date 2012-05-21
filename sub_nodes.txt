@@ -1,0 +1,14 @@
+L_Accu_first.asc
+L_Amyg_first.asc
+L_Caud_first.asc
+L_Hipp_first.asc
+L_Pall_first.asc
+L_Puta_first.asc
+L_Thal_first.asc
+R_Accu_first.asc
+R_Amyg_first.asc
+R_Caud_first.asc
+R_Hipp_first.asc
+R_Pall_first.asc
+R_Puta_first.asc
+R_Thal_first.asc

@@ -24,9 +24,9 @@ if ( $#argv == 0 ) then
 	echo " 	-reg: <reg> 		Registration type. Takes lin or nonlin."
 	echo "	-mode: <mode>		Stats to report. Takes either all (every FreeSurfer ROI), cwm (cortical white matter), or roi. If roi is specified, -id must be specified as well."	
 	echo "	-tensor: <tensor>	Image to get stats on. Takes either all or FA,RD,MD,L1, or MO."
-	echo "	-append: <append>	Append text to stats file name."
 	echo ""
 	echo "Optional Arguments:"
+	echo "	-append: <append>	Append text to stats file name."
 	echo "	-id: <FreeSurfer ROI>	Specify FreeSurfer ROI. For multiple ROIS use multiple -id flags."
 	echo '	-subjdir <dir>		FreeSurfer subjects directory. By default it will use directory used by dti_preproc.'
 	echo " 	-subj: <subj> 		Freesurfer subject ID. By default it will use subject ID used by dti_preproc."
@@ -38,7 +38,7 @@ if ( $#argv == 0 ) then
 endif
 
 #Set Defaults
-set id_list = ()
+set id_list = (); set append = ""
 
 #Parse arguments
 set args = ( $argv )
@@ -77,7 +77,7 @@ while ( $#argv > 0 )
 			endif
 			shift; breaksw;
 		case -append:
-			set append = $argv[1]; shift; breaksw;
+			set append = "_$argv[1]"; shift; breaksw;
 		case -id:
 			set id_list = ( $id_list $argv[1] ); shift; breaksw;
 		case -erode:
@@ -103,7 +103,7 @@ end
 if ( $?debug == 1 ) set echo
 
 #Check to make sure all required options have been set
-if ( $?outdir == 0 || $?reg == 0 || $?mode == 0 ) then
+if ( $?outdir == 0 || $?reg == 0 || $?mode == 0 || $?tensor_list == 0 ) then
 	echo "Missing required arguments. See usage."
 	exit 1
 endif
@@ -207,13 +207,13 @@ set defined_mask = ${dout}_defined_mask_${reg_end}.nii.gz
 
 #Get appropriate mask
 if ( $mode == "roi" ) then
-	if ( ! -e ${sout}_roi_mask_${append}.nii.gz || $?force == 1 ) then
+	if ( ! -e ${sout}_roi_mask${append}.nii.gz || $?force == 1 ) then
 		#Use FreeSurfer to get roi binary mask
 		set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
-		set cmd = ( $cmd --match $id_list --o ${sout}_roi_mask_${append}.nii.gz --mask $defined_mask )
+		set cmd = ( $cmd --match $id_list --o ${sout}_roi_mask${append}.nii.gz --mask $defined_mask )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
-	set mask = ${sout}_roi_mask_${append}.nii.gz
+	set mask = ${sout}_roi_mask${append}.nii.gz
 else if ( $mode == "cwm" ) then
 	if ( ! -e ${sout}_cwm_mask.nii.gz || $?force == 1 ) then
 		#Setup ROI list
@@ -225,10 +225,10 @@ else if ( $mode == "cwm" ) then
 		end
 		#Use FreeSurfer to get cortical wm mask
 		set cmd = ( $FREESURFER_HOME/bin/mri_binarize --i $subjdir/$subj/mri/wmparc.mgz )
-		set cmd = ( $cmd --match $id_list --o ${sout}_cwm_mask_${append}.nii.gz --mask $defined_mask )
+		set cmd = ( $cmd --match $id_list --o ${sout}_cwm_mask${append}.nii.gz --mask $defined_mask )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
-	set mask = ${sout}_cwm_mask_${append}.nii.gz
+	set mask = ${sout}_cwm_mask${append}.nii.gz
 else
 	set mask = $defined_mask 
 endif
@@ -250,10 +250,10 @@ foreach tensor ( $tensor_list )
 	endif
 	
 	#Use FreeSurfer to get tensor statistics
-	if ( ! -e ${sout}_${tensor}_${reg_end}_${mode}_stats_${append}.txt || $?force == 1 ) then
+	if ( ! -e ${sout}_${tensor}_${reg_end}_${mode}_stats${append}.txt || $?force == 1 ) then
 		set cmd = ( $FREESURFER_HOME/bin/mri_segstats --i ${dout}_${tensor}_${reg_end}.nii.gz )
 		set cmd = ( $cmd --ctab $FREESURFER_HOME/FreeSurferColorLUT.txt --mask $mask )
-		set cmd = ( $cmd --sum ${sout}_${tensor}_${reg_end}_${mode}_stats_${append}.txt )
+		set cmd = ( $cmd --sum ${sout}_${tensor}_${reg_end}_${mode}_stats${append}.txt )
 		set cmd = ( $cmd --seg ${SUBJECTS_DIR}/${subj}/mri/wmparc.mgz )
 		if ( $#id_list != 0 ) set cmd = ( $cmd --id $id_list )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log

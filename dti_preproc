@@ -185,7 +185,7 @@ if ( $?nodist == 0 ) then
 	set udir = $ddir/undist; if ( ! -d $udir ) mkdir $udir; set uout = $udir/${root}
 	
 	#Run distortion/eddy current correction
-	if ( ! -e ${uout}_epi_undist_mcf.nii.gz || $?force == 1 ) then
+	if ( ! -e ${uout}_epi_mcf_unwarped.nii.gz || $?force == 1 ) then
 		set cmd = ( epi_unwarp -m $mag -p $phase -e ${dout} -dwell $dwell -te $te -delta $delta )
 		set cmd = ( $cmd -epibet $bthresh -dtimc -o $udir -r ${root} -dil -debug )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
@@ -193,7 +193,7 @@ if ( $?nodist == 0 ) then
 
 	#Copy over undistorted b0
 	if ( ! -e ${dout}_b0.nii.gz || $?force == 1 ) then
-		set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_0_undist ${dout}_b0 )
+		set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_0_unwarped ${dout}_b0 )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 	
@@ -218,7 +218,7 @@ if ( $?nodist == 0 ) then
 	
 	#Copy over the whole undistorted series
 	if ( ! -e ${dout}_eddy.nii.gz || $?force == 1 ) then
-		set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_undist_mcf ${dout}_eddy )
+		set cmd = ( $FSLDIR/bin/imcp ${uout}_epi_mcf_unwarped ${dout}_eddy )
 		echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	endif
 	
@@ -535,12 +535,24 @@ if ( ! -e ${qout}_dti_brain_mask_qa.png || $?force == 1 ) then
 	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
 endif
 
-#Use FSL to get tensor fit SSE
+#Use FSL to get tensor fit SSE image
 if ( ! -e ${qout}_dti_sse_qa.png || $?force == 1 ) then
 	#Get before residual qa image
 	set cmd = ( $FSLDIR/bin/slicer ${dout}_sse $sliceropts )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_dti_sse_qa.png )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	
+	#Cleanup
+	echo rm ${qout}_sl?.png |& tee -a $log; rm ${qout}_sl?.png |& tee -a $log
+endif
+
+#Use FSL to get FA image QA
+if ( ! -e ${qout}_dti_FA_qa.png || $?force == 1 ) then
+	#Get before residual qa image
+	set cmd = ( $FSLDIR/bin/slicer ${dout}_FA $sliceropts )
+	echo $cmd |& tee -a $log; $cmd |& tee -a $log
+	set cmd = ( $FSLDIR/bin/pngappend $appendopts ${qout}_dti_FA_qa.png )
 	echo $cmd |& tee -a $log; $cmd |& tee -a $log
 	
 	#Cleanup
@@ -701,7 +713,7 @@ if ( ! -e ${qout}_dti_qa_index.html || $?force == 1 ) then
 	echo "Creating QA webpage at: `pwd`/${qout}_dti_qa_index.html" |& tee -a $log
 	#Create webpages
 	set web_list = ( ${qout}_dti_qa_mc.html ${qout}_dti_qa_bmsk.html \
-		  			 ${qout}_dti_qa_reg.html ${qout}_dti_qa_sse.html \
+		  			 ${qout}_dti_qa_reg.html ${qout}_dti_qa_fit.html \
 		  			 ${qout}_dti_qa_index.html )
 	touch $web_list
 	
@@ -710,7 +722,7 @@ if ( ! -e ${qout}_dti_qa_index.html || $?force == 1 ) then
 	echo "<center><h1>${program}: ${subj} Quick QA</center></h1>" | tee -a $web_list > /dev/null
 	echo "<center><a href=${root}_dti_qa_mc.html>Motion_Correction</a href> - \
 		  <a href=${root}_dti_qa_bmsk.html>Brain Masking</a href> - \
-		  <a href =${root}_dti_qa_sse.html>Tensor Fit SSE</a href> -\
+		  <a href =${root}_dti_qa_fit.html>Tensor Fit</a href> -\
 		  <a href=${root}_dti_qa_reg.html>Registration</a ref></center> " | tee -a $web_list > /dev/null
 	
 	#Setup Motion Correction
@@ -730,10 +742,12 @@ if ( ! -e ${qout}_dti_qa_index.html || $?force == 1 ) then
 	endif
 	echo "<p><IMG BORDER=0 SRC=${root}_dti_brain_mask_qa.png>" >> ${qout}_dti_qa_bmsk.html
 		 
-	#Setup SSE
-	echo "<hr><h2>Standard Deviation Images</h2>" >> ${qout}_dti_qa_sse.html
-	echo "Voxelwise Sum of Squares Error for the Tensor Fit." >> ${qout}_dti_qa_sse.html 
-	echo "<p><IMG BORDER=0 SRC=${root}_dti_sse_qa.png>" >> ${qout}_dti_qa_sse.html
+	#Setup Tensor Fit QA 
+	echo "<hr><h2>Tensor Fit QA</h2>" >> ${qout}_dti_qa_fit.html
+	echo "Voxelwise Sum of Squares Error for the Tensor Fit." >> ${qout}_dti_qa_fit.html 
+	echo "<p><IMG BORDER=0 SRC=${root}_dti_sse_qa.png>" >> ${qout}_dti_qa_fit.html
+	echo "FSL FA Image." >> ${qout}_dti_qa_fit.html 
+	echo "<p><IMG BORDER=0 SRC=${root}_dti_FA_qa.png>" >> ${qout}_dti_qa_fit.html
 		 
 	#Setup Registration
 	echo "<hr><h2>Registration</h2>" >> ${qout}_dti_qa_reg.html
